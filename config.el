@@ -5,19 +5,14 @@
 
 ;; Theme
 (setq doom-theme 'doom-one)
-
-;; Force 256 colors in terminal mode
-(when (not (display-graphic-p))
-  (setq tty-color-mode-on t)
-  (setq tty-color-mode 256))
-
-;; Add specific terminal settings for WSL
+;; Fix for Vertico string-width errors in WSL
 (when (getenv "WSL_DISTRO_NAME")
-  ;; Enable 24-bit colors in terminal if supported
-  (add-to-list 'default-frame-alist '(tty-color-mode . -24))
-  ;; You can also set specific faces for the terminal
-  (custom-set-faces
-   '(default ((t (:background "#282c34"))))))  ;; Adjust this color to match
+  ;; Add workaround for string-width in terminal
+  (advice-add #'string-width :around
+              (lambda (orig-fun &rest args)
+                (if (and (= (length args) 1) (stringp (car args)))
+                    (funcall orig-fun (car args))
+                  (apply orig-fun args)))))
 
 ;; Line numbers
 (setq display-line-numbers-type 'relative)
