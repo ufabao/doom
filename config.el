@@ -5,14 +5,27 @@
 
 ;; Theme
 (setq doom-theme 'doom-one)
-;; Fix for Vertico string-width errors in WSL
+;; Fix for WSL file completion with Vertico/Marginalia
 (when (getenv "WSL_DISTRO_NAME")
-  ;; Add workaround for string-width in terminal
-  (advice-add #'string-width :around
-              (lambda (orig-fun &rest args)
-                (if (and (= (length args) 1) (stringp (car args)))
-                    (funcall orig-fun (car args))
-                  (apply orig-fun args)))))
+  ;; Use a more compatible completion style in WSL
+  (setq completion-styles '(basic partial-completion emacs22 initials))
+
+  ;; Disable some fancy completion features that might cause issues
+  (after! vertico
+    (setq vertico-cycle nil)
+    (setq vertico-resize nil)
+    (setq vertico-count 10))
+
+  ;; Ensure marginalia annotations don't cause width calculation errors
+  (after! marginalia
+    (setq marginalia-field-width 80)
+    (setq marginalia-align 'left))
+
+  ;; Fix file-name-handler behavior in WSL
+  (when (not (display-graphic-p))
+    (setq file-name-handler-alist
+          (remq (rassq 'file-name-non-special file-name-handler-alist)
+                file-name-handler-alist))))
 
 ;; Line numbers
 (setq display-line-numbers-type 'relative)
