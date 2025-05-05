@@ -6,6 +6,19 @@
 ;; Theme
 (setq doom-theme 'doom-one)
 
+;; Force 256 colors in terminal mode
+(when (not (display-graphic-p))
+  (setq tty-color-mode-on t)
+  (setq tty-color-mode 256))
+
+;; Add specific terminal settings for WSL
+(when (getenv "WSL_DISTRO_NAME")
+  ;; Enable 24-bit colors in terminal if supported
+  (add-to-list 'default-frame-alist '(tty-color-mode . -24))
+  ;; You can also set specific faces for the terminal
+  (custom-set-faces
+   '(default ((t (:background "#282c34"))))))  ;; Adjust this color to match
+
 ;; Line numbers
 (setq display-line-numbers-type 'relative)
 
@@ -18,7 +31,7 @@
 ;; Basic C++ indentation settings
 (after! cc-mode
   (set-company-backend! 'c-mode
-    '(:separate company-irony-c-headers company-irony))
+                        '(:separate company-irony-c-headers company-irony))
   ;; Add more specific highlighting
   (font-lock-add-keywords
    'c++-mode
@@ -91,7 +104,9 @@
   (setq company-minimum-prefix-length 1))
 
 ;; Setup clipboard on wayland
-(when (getenv "WAYLAND_DISPLAY")
+(cond
+ ;; Fedora with Wayland
+ ((and (getenv "WAYLAND_DISPLAY") (executable-find "wl-copy"))
   (setq interprogram-cut-function
         (lambda (text &optional push)
           (let ((process-connection-type nil))
@@ -102,7 +117,7 @@
         (lambda ()
           (let ((clipboard-text (shell-command-to-string "wl-paste -n 2>/dev/null")))
             (unless (string= clipboard-text "")
-              clipboard-text)))))
+              clipboard-text))))))
 ;; Configure flycheck-inline for inline diagnostics
 ;; Simpler flycheck-inline configuration
 (use-package! flycheck-inline
