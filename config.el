@@ -17,6 +17,8 @@
 
 ;; Basic C++ indentation settings
 (after! cc-mode
+  (set-company-backend! 'c-mode
+    '(:separate company-irony-c-headers company-irony))
   ;; Add more specific highlighting
   (font-lock-add-keywords
    'c++-mode

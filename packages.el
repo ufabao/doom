@@ -1,2 +1,5 @@
 (package! cmake-mode)
 (package! flycheck-inline)
+(package! irony)
+(package! company-irony)
+(package! company-irony-c-headers)
