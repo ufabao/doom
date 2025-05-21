@@ -122,7 +122,30 @@
   (setq company-transformers '(company-sort-by-occurrence))
 
   (setq company-idle-delay 0.1)
-  (setq company-minimum-prefix-length 1))
+  (setq company-minimum-prefix-length 1)
+
+  ;; Add these settings to fix the cursor jump issue
+  ;; Prevent company from moving cursor after completion
+  (setq company-selection-wrap-around t)
+  (setq company-auto-commit nil)
+
+  ;; Fix alignment of annotation/documentation
+  (setq company-tooltip-align-annotations t)
+
+  ;; Prevent automatic scrolling when completing
+  (setq company-selection-default 0)
+  (setq company-auto-complete-chars nil)
+
+  ;; Only complete common part on first TAB
+  (setq company-require-match nil)
+
+  ;; Use a consistent popup width to avoid jumping
+  (setq company-tooltip-minimum-width 30)
+  (setq company-tooltip-maximum-width 60)
+
+  ;; Handle formatting edge cases for C++ templates
+  (setq company-clang-insert-arguments t)
+  (setq company-dabbrev-downcase nil))
 
 ;; Setup clipboard on wayland
 (cond
