@@ -66,8 +66,15 @@
           "--ranking-model=heuristics"
           "--pretty"                        ;; Make clangd output more human-readable
           "--header-insertion-decorators=false" ;; Don't add decorators to headers
-          "--log=error"))
-  (setq lsp-ui-sideline-enable nil)
+          "--log=verbose"                   ;; Changed from error to verbose
+          "--enable-config"))               ;; Enable .clangd config files
+
+  ;; Enable sideline temporarily to get more diagnostic info
+  (setq lsp-ui-sideline-enable t)  ;; Changed from nil to t
+  (setq lsp-ui-sideline-show-diagnostics t)
+  (setq lsp-ui-sideline-diagnostic-max-lines 3)  ;; Show more lines of diagnostic info
+  (setq lsp-ui-sideline-show-code-actions t)
+
   (add-to-list 'lsp-language-id-configuration '(cmake-mode . "cmake"))
   (lsp-register-client
    (make-lsp-client :new-connection (lsp-stdio-connection "cmake-language-server")
@@ -75,9 +82,20 @@
                     :server-id 'cmake-ls))
   ;; Enable flycheck with improved styling
   (setq lsp-diagnostics-provider :flycheck)
+  (setq lsp-diagnostic-package :flycheck)  ;; Additional setting for diagnostics
+  (setq lsp-ui-flycheck-enable t)  ;; Enable flycheck integration
 
   ;; Configure lsp-ui-doc for hovering information
-  (setq lsp-ui-doc-enable t)
+  (setq lsp-ui-doc-enable t
+        lsp-ui-doc-show-with-cursor t
+        lsp-ui-doc-show-with-mouse t
+        lsp-ui-doc-delay 0.2              ;; Show faster
+        lsp-ui-doc-max-width 120          ;; Wider to show more info
+        lsp-ui-doc-max-height 30          ;; Taller to show more lines
+        lsp-ui-doc-include-signature t    ;; Include function signatures
+        lsp-ui-doc-show-with-cursor nil   ;; Don't show automatically with cursor
+        lsp-ui-doc-show-with-mouse t)     ;; Show on mouse hover
+
   (setq lsp-ui-doc-position 'at-point)
   (setq lsp-ui-doc-show-with-cursor t)
 
@@ -87,6 +105,7 @@
   (setq lsp-inlay-hints-types t)
   (setq lsp-diagnostics-provider :flycheck)
   (setq lsp-eldoc-enable-hover t)
+  (setq lsp-eldoc-render-all t)  ;; Show all eldoc information
   (setq lsp-modeline-diagnostics-enable t)
   (setq lsp-signature-auto-activate t))
 
@@ -113,7 +132,11 @@
   ;; Show diagnostics immediately
   (setq flycheck-check-syntax-automatically '(save idle-change mode-enabled))
   (setq flycheck-idle-change-delay 0.1)
-  (setq flycheck-display-errors-function #'flycheck-display-error-messages-unless-error-list))
+  (setq flycheck-display-errors-function #'flycheck-display-error-messages-unless-error-list)
+
+  ;; Enable detailed error display
+  (setq flycheck-display-errors-delay 0.1)
+  (setq flycheck-help-echo-function #'flycheck-help-echo-all-error-messages))
 
 ;; Style the inlay hints to be less intrusive
 (custom-set-faces!
@@ -539,3 +562,31 @@ static char * run_icon[] = {
                                                   (build-dir (concat default-directory "build")))
                                              (compile (format "cd %s && ctest --output-on-failure" build-dir))))))
 
+;; Enhanced LSP diagnostic keybindings
+(map! :after lsp-mode
+      :map lsp-mode-map
+      :localleader
+      :desc "Show diagnostics list" "d" #'lsp-ui-flycheck-list
+      :desc "Describe thing at point" "D" #'lsp-describe-thing-at-point
+      :desc "Show hover doc" "h" #'lsp-ui-doc-show
+      :desc "Show all diagnostics" "x" #'lsp-treemacs-errors-list)  ;; If treemacs is available
+
+;; Additional keybinding for flycheck error list
+(map! :leader
+      :desc "Show error list" "c e" #'flycheck-list-errors)
+
+;; Function to force show detailed diagnostic info
+(defun show-detailed-diagnostic-at-point ()
+  "Show detailed diagnostic information at point using multiple methods."
+  (interactive)
+  (when (lsp-workspaces)
+    ;; Try multiple ways to show diagnostic info
+    (lsp-describe-thing-at-point)
+    ;; Also try to show the flycheck error
+    (when (flycheck-overlay-errors-at (point))
+      (flycheck-display-error-messages (flycheck-overlay-errors-at (point))))))
+
+(map! :after lsp-mode
+      :map lsp-mode-map
+      :localleader
+      :desc "Show detailed diagnostics" "i" #'show-detailed-diagnostic-at-point)
