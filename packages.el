@@ -3,3 +3,4 @@
 (package! irony)
 (package! hydra)
 (package! jsonrpc)
+(package! bazel :recipe (:host github :repo "bazelbuild/emacs-bazel-mode"))
