@@ -3,6 +3,10 @@
 ;; This file controls what Doom modules are enabled and what order they load
 ;; in. Remember to run 'doom sync' after modifying it!
 
+;; ===== DOOM EMACS MODULE CONFIGURATION =====
+;; This configuration enables various Doom modules for a complete development environment
+;; Each module provides specific functionality - see individual sections below
+
 ;; NOTE Press 'SPC h d h' (or 'C-h d h' for non-vim users) to access Doom's
 ;;      documentation. There you'll find a link to Doom's Module Index where all
 ;;      of our modules are listed, including what flags they support.
@@ -15,12 +19,16 @@
 ;;      directory (for easy access to its source code).
 
 (doom! :input
+       ;; ===== INPUT METHODS =====
+       ;; International input support (currently disabled)
        ;;bidi              ; (tfel ot) thgir etirw uoy gnipleh
        ;;chinese
        ;;japanese
        ;;layout            ; auie,ctsrnm is the superior home row
 
        :completion
+       ;; ===== COMPLETION FRAMEWORKS =====
+       ;; Modern completion system with icons and fuzzy matching
        ;; company           ; the ultimate code completion backend
        (corfu +icons +orderless)  ; complete with cap(f), cape and a flying feather!
        ;;helm              ; the *other* search engine for love and life
@@ -29,6 +37,8 @@
        (vertico +icons)           ; the search engine of the future
 
        :ui
+       ;; ===== USER INTERFACE ENHANCEMENTS =====
+       ;; Visual improvements and interface elements
        ;;deft              ; notational velocity for Emacs
        doom              ; what makes DOOM look the way it does
        doom-dashboard    ; a nifty splash screen for Emacs
@@ -54,6 +64,8 @@
        ;;zen               ; distraction-free coding or writing
 
        :editor
+       ;; ===== TEXT EDITING FEATURES =====
+       ;; Enhanced editing capabilities and automation
        (evil +everywhere); come to the dark side, we have cookies
        file-templates    ; auto-snippets for empty files
        fold              ; (nigh) universal code folding
@@ -68,6 +80,8 @@
        ;;word-wrap         ; soft wrapping with language-aware indent
 
        :emacs
+       ;; ===== CORE EMACS ENHANCEMENTS =====
+       ;; Improvements to built-in Emacs functionality
        dired             ; making dired pretty [functional]
        electric          ; smarter, keyword-based electric-indent
        ;;eww               ; the internet is gross
@@ -76,17 +90,23 @@
        vc                ; version-control and Emacs, sitting in a tree
 
        :term
+       ;; ===== TERMINAL INTEGRATION =====
+       ;; Terminal emulator support within Emacs
        ;;eshell            ; the elisp shell that works everywhere
        ;;shell             ; simple shell REPL for Emacs
        ;;term              ; basic terminal emulator for Emacs
        vterm             ; the best terminal emulation in Emacs
 
        :checkers
+       ;; ===== CODE QUALITY CHECKING =====
+       ;; Syntax and error checking tools
        syntax              ; tasing you for every semicolon you forget
        ;;(spell +flyspell) ; tasing you for misspelling mispelling
        ;;grammar           ; tasing grammar mistake every you make
 
        :tools
+       ;; ===== DEVELOPMENT TOOLS =====
+       ;; External tool integrations and productivity features
        ;;ansible
        ;;biblio            ; Writes a PhD for you (citation needed)
        ;;collab            ; buffers with friends
@@ -108,13 +128,17 @@
        ;;upload            ; map local to remote projects via ssh/ftp
 
        :os
+       ;; ===== OPERATING SYSTEM INTEGRATION =====
+       ;; OS-specific enhancements and compatibility
        (:if (featurep :system 'macos) macos)  ; improve compatibility with macOS
        tty               ; improve the terminal Emacs experience
 
        :lang
+       ;; ===== PROGRAMMING LANGUAGE SUPPORT =====
+       ;; Language-specific modes and integrations
        ;;agda              ; types of types of types of types...
        ;;beancount         ; mind the GAAP
-       (cc +lsp +tree-sitter +snippets)         ; C > C++ == 1
+       (cc +lsp +tree-sitter +snippets)         ; C/C++ with full IDE features
        ;;clojure           ; java with a lisp
        ;;common-lisp       ; if you've seen one lisp, you've seen them all
        ;;coq               ; proofs-as-programs
@@ -144,7 +168,7 @@
        ;;javascript        ; all(hope(abandon(ye(who(enter(here))))))
        ;;julia             ; a better, faster MATLAB
        ;;kotlin            ; a better, slicker Java(Script)
-       (latex +lsp)             ; writing papers in Emacs has never been so fun
+       (latex +lsp)             ; LaTeX document preparation with LSP
        ;;lean              ; for folks with too much to prove
        ;;ledger            ; be audit you can be
        ;;lua               ; one-based indices? one-based indices
@@ -157,14 +181,14 @@
        ;;plantuml          ; diagrams for confusing people more
        ;;graphviz          ; diagrams for confusing yourself even more
        ;;purescript        ; javascript, but functional
-       (python + lsp +pyright +pyenv +tree-sitter)
+       (python + lsp +pyright +pyenv +tree-sitter)  ; Python with full IDE features
        ;;qt                ; the 'cutest' gui framework ever
        ;;racket            ; a DSL for DSLs
        ;;raku              ; the artist formerly known as perl6
        ;;rest              ; Emacs as a REST client
        ;;rst               ; ReST in peace
        ;;(ruby +rails)     ; 1.step {|i| p "Ruby is #{i.even? ? 'love' : 'life'}"}
-       (rust +lsp +tree-sitter)       ; Fe2O3.unwrap().unwrap().unwrap().unwrap()
+       (rust +lsp +tree-sitter)       ; Rust with full IDE features
        ;;scala             ; java, but good
        ;;(scheme +guile)   ; a fully conniving family of lisps
        sh                ; she sells {ba,z,fi}sh shells on the C xor
@@ -189,5 +213,7 @@
        ;;(rss +org)        ; emacs as an RSS reader
 
        :config
+       ;; ===== DOOM CONFIGURATION =====
+       ;; Default Doom settings and key bindings
        ;;literate
-       (default +bindings +smartparens))
+       (default +bindings +smartparens))  ; Essential Doom defaults with vim bindings
