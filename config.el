@@ -220,31 +220,43 @@
   '(lsp-inlay-hint-face :foreground "#5d8cc0" :background nil :slant italic :height 0.9 :inherit nil)
   '(lsp-inlay-parameter-hint-face :foreground "#6a9955" :background nil :slant italic :height 0.9)
   '(lsp-inlay-type-hint-face :foreground "#ce9178" :background nil :slant italic :height 0.9))
-;; ===== JUPYTER NOTEBOOK SUPPORT =====
-;; EIN (Emacs IPython Notebook) configuration for Jupyter integration
+
+
+;; ===== ADVANCED JUPYTER (EIN) SETUP =====
 (after! ein
-  ;; Basic EIN settings
-  (setq ein:output-area-inlined-images t)
-  (setq ein:slice-image t)
+  (setq ein:output-area-inlined-images t
+        ein:slice-image t
+        ein:jupyter-default-server-command "jupyter"
+        ein:jupyter-default-notebook-directory "~/notebooks")
 
-  ;; Use jupyter command rather than older ipython
-  (setq ein:jupyter-default-server-command "jupyter")
+  ;; 1. Use Polymode for syntax highlighting inside cells
+  ;;    This allows standard Doom editing commands to work inside python/c++ blocks
+  (add-hook! 'ein:notebook-mode-hook #'poly-ein-mode)
 
-  ;; Enable websocket support
-  (setq ein:jupyter-server-use-containers nil)
+  ;; 2. Better Completion (Company integration)
+  (setq ein:completion-backend 'ein:use-company-backend)
 
-  ;; Set default notebook directory
-  (setq ein:jupyter-default-notebook-directory "~/notebooks")
-
-  ;; Add keybindings for common operations
+  ;; 3. Keybindings that match Doom's "Leader" philosophy
   (map! :map ein:notebook-mode-map
+        :n "RET" #'ein:worksheet-execute-cell-and-goto-next
+        :n "gj"  #'ein:worksheet-goto-next-input
+        :n "gk"  #'ein:worksheet-goto-prev-input
+        ;; Quick cell manipulation
         :localleader
-        "," #'ein:worksheet-execute-cell
-        "." #'ein:worksheet-execute-cell-and-goto-next
-        "b" #'ein:worksheet-insert-cell-below
-        "a" #'ein:worksheet-insert-cell-above))
+        :desc "Execute cell"          "e" #'ein:worksheet-execute-cell
+        :desc "Execute & next"        "E" #'ein:worksheet-execute-cell-and-goto-next
+        :desc "Kill cell"             "d" #'ein:worksheet-kill-cell
+        :desc "Insert below"          "o" #'ein:worksheet-insert-cell-below
+        :desc "Insert above"          "O" #'ein:worksheet-insert-cell-above
+        :desc "Clear output"          "l" #'ein:worksheet-clear-output
+        :desc "Restart kernel"        "r" #'ein:notebook-restart-session-command-1
+        :desc "Save notebook"         "s" #'ein:notebook-save-notebook-command))
 
-
+;; Optional: Make the notebook look cleaner (closer to a modern editor)
+(add-hook! 'ein:notebook-mode-hook
+  (defun +ein-prettify-h ()
+    (set-face-attribute 'ein:cell-input-area nil :background "#1a1b26") ;; Matches Tokyo Night
+    (display-line-numbers-mode -1))) ;; Line numbers usually clutter notebooks
 
 ;; Enhanced LSP diagnostic keybindings
 (map! :after lsp-mode
@@ -539,3 +551,68 @@
 
 ;; Add to modeline if desired
 ;; (add-to-list 'global-mode-string '(:eval (bazel-modeline-config)) t)
+
+;; ===== IMPROVED NAVIGATION & VISUALS =====
+
+;; 1. Harpoon Configuration (The "Alt-Tab" for code)
+;; Quick jumps to your 4 most active files
+(map! :n "C-1" #'harpoon-go-to-1
+      :n "C-2" #'harpoon-go-to-2
+      :n "C-3" #'harpoon-go-to-3
+      :n "C-4" #'harpoon-go-to-4
+      :leader
+      :desc "Harpoon menu" "h m" #'harpoon-quick-menu-hydra
+      :desc "Harpoon add file"   "h a" #'harpoon-add-file
+      :desc "Harpoon clear"      "h c" #'harpoon-clear)
+
+;; 2. Rainbow Delimiters
+;; Helps visualize nested brackets in C++ templates and complex macros
+;; (add-hook! 'prog-mode-hook #'rainbow-delimiters-mode)
+
+;; 3. Tree-Sitter Support
+;; Ensure we prioritize the better syntax highlighting if available
+(setq major-mode-remap-alist
+      '((c-mode . c-ts-mode)
+        (c++-mode . c++-ts-mode)
+        (python-mode . python-ts-mode)))
+
+;; ===== ORG & JUPYTER CONFIGURATION =====
+
+(use-package! jupyter
+  :after org
+  :config
+  (require 'ob-jupyter))
+
+(after! org
+  (setq org-babel-load-languages
+        '((emacs-lisp . t)
+          (python . t)
+          (jupyter . t)))
+
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   org-babel-load-languages)
+
+  (setq org-confirm-babel-evaluate nil)
+
+  (add-hook 'org-babel-after-execute-hook
+            #'org-display-inline-images))
+
+;; Add a snippet to insert a Jupyter Python block
+(defun my-org-insert-jupyter-cell ()
+  "Insert a new jupyter-python src block."
+  (interactive)
+  (insert "#+begin_src jupyter :kernel pyvenv :session py :results output\n\n#+end_src\n")
+  (forward-line -1))
+
+;; Bind to local leader or a key
+(map! :leader
+      :desc "Insert Jupyter cell" "i j" #'my-org-insert-jupyter-cell)
+
+(setq ob-jupyter-default-server-command
+      "/home/micah/projects/python/.venv/bin/jupyter")
+;; Display inline images automatically after evaluating a src block
+(add-hook 'org-babel-after-execute-hook 'org-display-inline-images)
+
+;; Optional: refresh inline images when opening the org buffer
+(add-hook 'org-mode-hook 'org-display-inline-images)

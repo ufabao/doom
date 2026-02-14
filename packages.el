@@ -10,3 +10,5 @@
 (package! irony)           ; C/C++ completion backend
 (package! hydra)           ; Create repeatable key sequences
 (package! jsonrpc)         ; JSON-RPC communication protocol
+(package! harpoon)
+(package! jupyter)
