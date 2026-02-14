@@ -5,10 +5,14 @@
 
 ;; ===== APPEARANCE CONFIGURATION =====
 ;; Font settings - using JetBrains Mono with Nerd Font support for icons
-(setq doom-font (font-spec :family "JetBrainsMono Nerd Font" :size 16))
+(setq doom-font (font-spec
+                 :family "JetBrainsMono Nerd Font"
+                 :size 16
+                 :weight 'regular))
 
 ;; Color theme - Tokyo Night provides a dark, modern appearance
-(setq doom-theme 'doom-tokyo-night)
+;; (setq doom-theme 'doom-tokyo-night)
+(setq doom-theme 'doom-dracula)
 
 ;; Line numbers - relative numbering for easier navigation (vim-style)
 (setq display-line-numbers-type 'relative)
@@ -616,3 +620,38 @@
 
 ;; Optional: refresh inline images when opening the org buffer
 (add-hook 'org-mode-hook 'org-display-inline-images)
+(setq org-startup-with-inline-images t)
+(setq org-display-remote-inline-images 'download)
+(setq org-babel-results-separator "\n")
+
+(after! ligature
+  (ligature-set-ligatures
+   't
+   '("www" "**" "***" "**/" "*>" "*/" "\\\\" "\\\\\\"
+     "{-" "[]" "::" ":::" ":=" "!!" "!=" "!==" "-}"
+     "--" "---" "-->" "->" "->>" "-<" "-<<" "-~"
+     "#{" "#[" "##" "###" "####" "#(" "#?" "#_" "#_("
+     ".-" ".=" ".." "..<" "..." "?=" "??" ";;" "/*"
+     "/**" "/=" "/==" "/>" "//" "///" "&&" "||"
+     "||=" "|=" "|>" "^=" "$>" "++" "+++" "+>"
+     "=:=" "==" "===" "==>" "=>" "=>>" "<="
+     "=<<" "=/=" ">-" ">=" ">=>" ">>" ">>-"
+     ">>=" ">>>" "<*" "<*>" "<|" "<|>" "<$"
+     "<$>" "<!--" "<-" "<--" "<->" "<+"
+     "<+>" "<=" "<==" "<=>" "<=<" "<>" "<<"
+     "<<-" "<<=" "<<<" "<~" "<~~" "</"
+     "</>" "~@" "~-" "~=" "~>" "~~" "~~>"
+     "%%"))
+
+  (global-ligature-mode t))
+
+
+;; When editing src blocks, use real language major mode
+(setq org-src-tab-acts-natively t)
+(setq org-src-preserve-indentation t)
+
+;; Start LSP automatically in python src edit buffers
+(add-hook 'org-src-mode-hook
+          (lambda ()
+            (when (derived-mode-p 'python-mode)
+              (lsp-deferred))))
