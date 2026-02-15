@@ -65,6 +65,7 @@
   (setq lsp-ui-sideline-diagnostic-max-lines 3)  ;; Show more lines of diagnostic info
   (setq lsp-ui-sideline-show-code-actions t)
 
+
   (add-to-list 'lsp-language-id-configuration '(cmake-mode . "cmake"))
   (lsp-register-client
    (make-lsp-client :new-connection (lsp-stdio-connection "cmake-language-server")
@@ -226,42 +227,6 @@
   '(lsp-inlay-type-hint-face :foreground "#ce9178" :background nil :slant italic :height 0.9))
 
 
-;; ===== ADVANCED JUPYTER (EIN) SETUP =====
-(after! ein
-  (setq ein:output-area-inlined-images t
-        ein:slice-image t
-        ein:jupyter-default-server-command "jupyter"
-        ein:jupyter-default-notebook-directory "~/notebooks")
-
-  ;; 1. Use Polymode for syntax highlighting inside cells
-  ;;    This allows standard Doom editing commands to work inside python/c++ blocks
-  (add-hook! 'ein:notebook-mode-hook #'poly-ein-mode)
-
-  ;; 2. Better Completion (Company integration)
-  (setq ein:completion-backend 'ein:use-company-backend)
-
-  ;; 3. Keybindings that match Doom's "Leader" philosophy
-  (map! :map ein:notebook-mode-map
-        :n "RET" #'ein:worksheet-execute-cell-and-goto-next
-        :n "gj"  #'ein:worksheet-goto-next-input
-        :n "gk"  #'ein:worksheet-goto-prev-input
-        ;; Quick cell manipulation
-        :localleader
-        :desc "Execute cell"          "e" #'ein:worksheet-execute-cell
-        :desc "Execute & next"        "E" #'ein:worksheet-execute-cell-and-goto-next
-        :desc "Kill cell"             "d" #'ein:worksheet-kill-cell
-        :desc "Insert below"          "o" #'ein:worksheet-insert-cell-below
-        :desc "Insert above"          "O" #'ein:worksheet-insert-cell-above
-        :desc "Clear output"          "l" #'ein:worksheet-clear-output
-        :desc "Restart kernel"        "r" #'ein:notebook-restart-session-command-1
-        :desc "Save notebook"         "s" #'ein:notebook-save-notebook-command))
-
-;; Optional: Make the notebook look cleaner (closer to a modern editor)
-(add-hook! 'ein:notebook-mode-hook
-  (defun +ein-prettify-h ()
-    (set-face-attribute 'ein:cell-input-area nil :background "#1a1b26") ;; Matches Tokyo Night
-    (display-line-numbers-mode -1))) ;; Line numbers usually clutter notebooks
-
 ;; Enhanced LSP diagnostic keybindings
 (map! :after lsp-mode
       :map lsp-mode-map
@@ -291,271 +256,6 @@
       :localleader
       :desc "Show detailed diagnostics" "i" #'show-detailed-diagnostic-at-point)
 
-;; ===== BUILD SYSTEM INTEGRATION (BAZEL) =====
-;; Comprehensive Bazel build system integration with multiple configurations
-
-;; Define available build configurations
-(defcustom bazel-build-configs
-  '(("gcc-debug" . "--config=gcc --compilation_mode=dbg")
-    ("gcc-release" . "--config=gcc --compilation_mode=opt")
-    ("clang-debug" . "--config=clang --compilation_mode=dbg")
-    ("clang-release" . "--config=clang --compilation_mode=opt")
-    ("default-debug" . "--compilation_mode=dbg")
-    ("default-release" . "--compilation_mode=opt"))
-  "List of Bazel build configurations."
-  :type '(alist :key-type string :value-type string)
-  :group 'bazel)
-
-(defcustom bazel-default-config "default-debug"
-  "Default Bazel build configuration."
-  :type 'string
-  :group 'bazel)
-
-(defcustom bazel-common-build-flags
-  '("--jobs=auto"
-    "--verbose_failures"
-    "--sandbox_debug")
-  "Common flags to add to all Bazel builds."
-  :type '(repeat string)
-  :group 'bazel)
-
-;; Store the last used configuration
-(defvar bazel-last-config bazel-default-config
-  "Last used Bazel configuration.")
-
-;; Enhanced Bazel functions
-(defun bazel-get-targets ()
-  "Get list of available Bazel targets."
-  (let* ((default-directory (or (locate-dominating-file "." "WORKSPACE")
-                                (locate-dominating-file "." "WORKSPACE.bazel")
-                                (locate-dominating-file "." "MODULE.bazel")
-                                default-directory))
-         (cmd "bazel query //... --output=label 2>/dev/null")
-         (output (shell-command-to-string cmd)))
-    (split-string output "\n" t)))
-
-(defun bazel-format-command (action target config-flags extra-flags)
-  "Format a Bazel command with the given parameters."
-  (let ((common-flags (mapconcat 'identity bazel-common-build-flags " ")))
-    (string-trim
-     (format "bazel %s %s %s %s %s"
-             action
-             target
-             (or config-flags "")
-             common-flags
-             (or extra-flags "")))))
-
-;; Simple build with last configuration (for SPC B b)
-(defun bazel-build-with-completion ()
-  "Build a Bazel target with completion using the last configuration."
-  (interactive)
-  (let* ((targets (bazel-get-targets))
-         (target (completing-read "Build target: " targets))
-         (config-flags (cdr (assoc bazel-last-config bazel-build-configs))))
-    (when target
-      (compile (bazel-format-command "build" target config-flags nil))
-      (message "Building %s with config: %s" target bazel-last-config))))
-
-;; Advanced build with configuration selection
-(defun bazel-build-advanced ()
-  "Build a Bazel target with configuration selection."
-  (interactive)
-  (let* ((targets (bazel-get-targets))
-         (target (completing-read "Build target: " targets))
-         (config (completing-read
-                  (format "Build configuration (current: %s): " bazel-last-config)
-                  (mapcar 'car bazel-build-configs)
-                  nil t nil nil bazel-last-config))
-         (config-flags (cdr (assoc config bazel-build-configs)))
-         (extra-flags (read-string "Extra flags (optional): ")))
-    (when target
-      (setq bazel-last-config config)
-      (compile (bazel-format-command "build" target config-flags extra-flags))
-      (message "Building %s with config: %s" target config))))
-
-;; Build with custom flags
-(defun bazel-build-custom ()
-  "Build a Bazel target with completely custom flags."
-  (interactive)
-  (let* ((targets (bazel-get-targets))
-         (target (completing-read "Build target: " targets))
-         (custom-flags (read-string "Custom build flags: ")))
-    (when target
-      (compile (format "bazel build %s %s" target custom-flags)))))
-
-;; Test functions with configuration
-(defun bazel-test-with-completion ()
-  "Test a Bazel target with completion using the last configuration."
-  (interactive)
-  (let* ((targets (bazel-get-targets))
-         (target (completing-read "Test target: " targets))
-         (config-flags (cdr (assoc bazel-last-config bazel-build-configs))))
-    (when target
-      (compile (bazel-format-command "test" target config-flags "--test_output=all")))))
-
-(defun bazel-test-advanced ()
-  "Test a Bazel target with configuration selection."
-  (interactive)
-  (let* ((targets (bazel-get-targets))
-         (target (completing-read "Test target: " targets))
-         (config (completing-read
-                  (format "Test configuration (current: %s): " bazel-last-config)
-                  (mapcar 'car bazel-build-configs)
-                  nil t nil nil bazel-last-config))
-         (config-flags (cdr (assoc config bazel-build-configs)))
-         (test-flags (read-string "Extra test flags (optional): ")))
-    (when target
-      (setq bazel-last-config config)
-      (compile (bazel-format-command "test" target config-flags
-                                     (format "--test_output=all %s" test-flags))))))
-
-;; Run functions with configuration
-(defun bazel-run-with-completion ()
-  "Run a Bazel target with completion using the last configuration."
-  (interactive)
-  (let* ((targets (bazel-get-targets))
-         (target (completing-read "Run target: " targets))
-         (config-flags (cdr (assoc bazel-last-config bazel-build-configs))))
-    (when target
-      (compile (bazel-format-command "run" target config-flags nil)))))
-
-(defun bazel-run-advanced ()
-  "Run a Bazel target with configuration selection."
-  (interactive)
-  (let* ((targets (bazel-get-targets))
-         (target (completing-read "Run target: " targets))
-         (config (completing-read
-                  (format "Run configuration (current: %s): " bazel-last-config)
-                  (mapcar 'car bazel-build-configs)
-                  nil t nil nil bazel-last-config))
-         (config-flags (cdr (assoc config bazel-build-configs)))
-         (run-args (read-string "Program arguments (optional): ")))
-    (when target
-      (setq bazel-last-config config)
-      (if (string-empty-p run-args)
-          (compile (bazel-format-command "run" target config-flags nil))
-        (compile (bazel-format-command "run" target config-flags (format "-- %s" run-args)))))))
-
-;; Configuration management functions
-(defun bazel-set-default-config ()
-  "Set the default Bazel configuration."
-  (interactive)
-  (let ((config (completing-read
-                 (format "Set default configuration (current: %s): " bazel-last-config)
-                 (mapcar 'car bazel-build-configs)
-                 nil t nil nil bazel-last-config)))
-    (setq bazel-last-config config)
-    (message "Default configuration set to: %s" config)))
-
-(defun bazel-show-current-config ()
-  "Show the current Bazel configuration."
-  (interactive)
-  (message "Current Bazel configuration: %s" bazel-last-config))
-
-;; Clean functions
-(defun bazel-clean ()
-  "Clean Bazel build artifacts."
-  (interactive)
-  (compile "bazel clean"))
-
-(defun bazel-clean-expunge ()
-  "Clean Bazel build artifacts and remove the entire working tree."
-  (interactive)
-  (when (yes-or-no-p "This will remove the entire Bazel working tree. Continue? ")
-    (compile "bazel clean --expunge")))
-
-;; Other utility functions
-(defun bazel-list-targets ()
-  "List all available Bazel targets."
-  (interactive)
-  (let ((targets (bazel-get-targets)))
-    (with-output-to-temp-buffer "*Bazel Targets*"
-      (dolist (target targets)
-        (princ (format "%s\n" target))))))
-
-(defun bazel-query ()
-  "Run a Bazel query."
-  (interactive)
-  (let ((query (read-string "Bazel query: ")))
-    (when (not (string-empty-p query))
-      (compile (format "bazel query '%s'" query)))))
-
-(defun bazel-info ()
-  "Show Bazel workspace info."
-  (interactive)
-  (compile "bazel info"))
-
-;; Generate compile_commands.json
-(defun bazel-refresh-compile-commands ()
-  "Refresh compile_commands.json using Hedron's refresh_compile_commands."
-  (interactive)
-  (compile "bazel run //:refresh_compile_commands")
-  (message "Refreshing compile_commands.json..."))
-
-;; Updated keybindings
-(map! :leader
-      (:prefix ("B" . "bazel")
-       ;; Quick actions (use last configuration)
-       :desc "Build target" "b" #'bazel-build-with-completion
-       :desc "Run target" "r" #'bazel-run-with-completion
-       :desc "Test target" "t" #'bazel-test-with-completion
-
-       ;; Advanced actions (with configuration selection)
-       :desc "Build (advanced)" "B" #'bazel-build-advanced
-       :desc "Run (advanced)" "R" #'bazel-run-advanced
-       :desc "Test (advanced)" "T" #'bazel-test-advanced
-
-       ;; Custom and configuration
-       :desc "Build (custom flags)" "C" #'bazel-build-custom
-       :desc "Set default config" "c" #'bazel-set-default-config
-       :desc "Show current config" "s" #'bazel-show-current-config
-
-       ;; Utility commands
-       :desc "Clean" "x" #'bazel-clean
-       :desc "Clean (expunge)" "X" #'bazel-clean-expunge
-       :desc "List targets" "l" #'bazel-list-targets
-       :desc "Query" "q" #'bazel-query
-       :desc "Info" "i" #'bazel-info
-       :desc "Refresh compile_commands" "g" #'bazel-refresh-compile-commands))
-
-;; Also add keybindings for BUILD files
-(use-package! bazel
-  :defer t
-  :config
-  ;; File associations
-  (add-to-list 'auto-mode-alist '("\\.bazel\\'" . bazel-build-mode))
-  (add-to-list 'auto-mode-alist '("BUILD\\'" . bazel-build-mode))
-  (add-to-list 'auto-mode-alist '("BUILD\\.bazel\\'" . bazel-build-mode))
-  (add-to-list 'auto-mode-alist '("WORKSPACE\\'" . bazel-workspace-mode))
-  (add-to-list 'auto-mode-alist '("WORKSPACE\\.bazel\\'" . bazel-workspace-mode))
-  (add-to-list 'auto-mode-alist '("\\.bzl\\'" . bazel-starlark-mode))
-
-  ;; Local keybindings for BUILD files
-  (map! :after bazel
-        :map bazel-build-mode-map
-        :localleader
-        :desc "Build target" "b" #'bazel-build-with-completion
-        :desc "Build (advanced)" "B" #'bazel-build-advanced
-        :desc "Test target" "t" #'bazel-test-with-completion
-        :desc "Test (advanced)" "T" #'bazel-test-advanced
-        :desc "Run target" "r" #'bazel-run-with-completion
-        :desc "Run (advanced)" "R" #'bazel-run-advanced
-        :desc "Set config" "c" #'bazel-set-default-config
-        :desc "Clean" "x" #'bazel-clean
-        :desc "List targets" "l" #'bazel-list-targets))
-
-;; Display current configuration in modeline (optional)
-(defun bazel-modeline-config ()
-  "Return current Bazel config for modeline."
-  (when (and (boundp 'bazel-last-config)
-             (or (derived-mode-p 'bazel-build-mode)
-                 (derived-mode-p 'c++-mode)
-                 (derived-mode-p 'c-mode)))
-    (format " Bazel[%s]" bazel-last-config)))
-
-;; Add to modeline if desired
-;; (add-to-list 'global-mode-string '(:eval (bazel-modeline-config)) t)
-
 ;; ===== IMPROVED NAVIGATION & VISUALS =====
 
 ;; 1. Harpoon Configuration (The "Alt-Tab" for code)
@@ -578,7 +278,7 @@
 (setq major-mode-remap-alist
       '((c-mode . c-ts-mode)
         (c++-mode . c++-ts-mode)
-        (python-mode . python-ts-mode)))
+        (-mode . python-ts-mode)))
 
 ;; ===== ORG & JUPYTER CONFIGURATION =====
 
@@ -602,9 +302,9 @@
   (add-hook 'org-babel-after-execute-hook
             #'org-display-inline-images))
 
-;; Add a snippet to insert a Jupyter Python block
+;; Add a snippet to insert a Jupyter  block
 (defun my-org-insert-jupyter-cell ()
-  "Insert a new jupyter-python src block."
+  "Insert a new jupyter- src block."
   (interactive)
   (insert "#+begin_src jupyter :kernel pyvenv :session py :results output\n\n#+end_src\n")
   (forward-line -1))
@@ -614,7 +314,7 @@
       :desc "Insert Jupyter cell" "i j" #'my-org-insert-jupyter-cell)
 
 (setq ob-jupyter-default-server-command
-      "/home/micah/projects/python/.venv/bin/jupyter")
+      "/home/micah/projects//.venv/bin/jupyter")
 ;; Display inline images automatically after evaluating a src block
 (add-hook 'org-babel-after-execute-hook 'org-display-inline-images)
 
@@ -650,8 +350,22 @@
 (setq org-src-tab-acts-natively t)
 (setq org-src-preserve-indentation t)
 
-;; Start LSP automatically in python src edit buffers
-(add-hook 'org-src-mode-hook
-          (lambda ()
-            (when (derived-mode-p 'python-mode)
-              (lsp-deferred))))
+;; Start LSP automatically in  src edit buffers
+(after! org
+  (add-hook 'org-src-mode-hook
+            (lambda ()
+              (when (derived-mode-p 'python-mode)
+                (lsp-deferred)))))
+
+(after! org
+  ;; Map 'jupyter' source blocks to 'python-mode'
+  ;; This ensures your existing LSP hook fires when editing these blocks
+  (add-to-list 'org-src-lang-modes '("jupyter" . python))
+  (add-to-list 'org-src-lang-modes '("jupyter" . python)))
+(defun +org-src-enable-lsp-if-python ()
+  "Enable LSP for python src blocks in Org."
+  (when (derived-mode-p 'python-mode)
+    (lsp-deferred)))
+
+(add-hook 'org-src-mode-hook #'+org-src-enable-lsp-if-python)
+(add-hook 'org-src-mode-hook #'+org-jupyter-enable-lsp)
