@@ -13,3 +13,5 @@
 (package! harpoon)
 (package! jupyter)
 (package! lsp-pyright)
+;; (package! polymode)
+;; (package! poly-org)

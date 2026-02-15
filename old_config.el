@@ -320,103 +320,16 @@
   (add-hook 'org-babel-after-execute-hook
             #'org-display-inline-images))
 
-;; ===== VSCODE-LIKE JUPYTER BEHAVIOR =====
-
-;; Show return values like VSCode (use :results value instead of :results output)
-;; This will display the last expression's value automatically
+;; Add a snippet to insert a Jupyter python block
 (defun my-org-insert-jupyter-cell ()
-  "Insert a new jupyter-python src block with VSCode-like behavior."
+  "Insert a new jupyter-python src block."
   (interactive)
-  ;; Use :results value to show return values, not just print() output
-  (insert "#+begin_src jupyter-python :session py :results value\n\n#+end_src\n")
+  (insert "#+begin_src jupyter-python :kernel pyvenv :session py :results output\n\n#+end_src\n")
   (forward-line -1))
 
-;; Execute cell and create new cell below (like Shift-Enter in VSCode)
-(defun my-org-jupyter-execute-and-next ()
-  "Execute current cell and create/move to next cell (VSCode Shift-Enter behavior)."
-  (interactive)
-  (org-babel-execute-src-block)
-  ;; Wait a moment for execution to complete
-  (sit-for 0.1)
-  ;; Try to find next src block
-  (let ((current-pos (point)))
-    (if (re-search-forward "^#\\+begin_src" nil t)
-        ;; Found next block, go into it
-        (progn
-          (forward-line 1)
-          (beginning-of-line))
-      ;; No next block, create one
-      (goto-char current-pos)
-      (org-babel-next-src-block)  ;; Go to end of current block
-      (forward-line 1)
-      (end-of-line)
-      (insert "\n\n")
-      (my-org-insert-jupyter-cell)
-      (forward-line 1))))
-
-;; Execute cell and stay in place (like Ctrl-Enter in VSCode)
-(defun my-org-jupyter-execute-and-stay ()
-  "Execute current cell and stay in place (VSCode Ctrl-Enter behavior)."
-  (interactive)
-  (org-babel-execute-src-block))
-
-;; Jump to next INPUT block (skip results)
-(defun my-org-jupyter-next-cell ()
-  "Jump to next jupyter src block, skipping results."
-  (interactive)
-  (let ((start-pos (point)))
-    ;; Move past current block if we're in one
-    (when (org-in-src-block-p)
-      (org-babel-next-src-block))
-    ;; Find next src block
-    (if (re-search-forward "^#\\+begin_src" nil t)
-        (progn
-          (forward-line 1)
-          (beginning-of-line))
-      (goto-char start-pos)
-      (message "No next cell"))))
-
-;; Jump to previous INPUT block (skip results)
-(defun my-org-jupyter-prev-cell ()
-  "Jump to previous jupyter src block, skipping results."
-  (interactive)
-  (let ((start-pos (point)))
-    ;; If we're in a block, go to its start first
-    (when (org-in-src-block-p)
-      (re-search-backward "^#\\+begin_src" nil t))
-    ;; Now find previous block
-    (if (re-search-backward "^#\\+begin_src" nil t 2)
-        (progn
-          (forward-line 1)
-          (beginning-of-line))
-      (goto-char start-pos)
-      (message "No previous cell"))))
-
-;; Keybindings for Jupyter-like workflow
-;; These need to be set with higher priority to work even with polymode
-(map! :after org
-      :map org-mode-map
-      ;; VSCode-like execution (both normal and insert mode)
-      :ni "C-<return>" #'my-org-jupyter-execute-and-stay    ;; Ctrl-Enter: execute, stay
-      :ni "S-<return>" #'my-org-jupyter-execute-and-next    ;; Shift-Enter: execute, next
-      
-      ;; Better cell navigation (skip results blocks)
-      :n "g j" #'my-org-jupyter-next-cell
-      :n "g k" #'my-org-jupyter-prev-cell
-      
-      ;; Quick insert cell
-      :n "g I" #'my-org-insert-jupyter-cell)
-
-;; Also set these in evil normal state for org-mode specifically
-(after! evil-org
-  (map! :map evil-org-mode-map
-        :n "g j" #'my-org-jupyter-next-cell
-        :n "g k" #'my-org-jupyter-prev-cell))
-
-;; Also bind via leader key
+;; Bind to local leader or a key
 (map! :leader
-      :desc "Insert Jupyter cell" "i j" #'my-org-insert-jupyter-cell
-      :desc "Execute and next" "i e" #'my-org-jupyter-execute-and-next)
+      :desc "Insert Jupyter cell" "i j" #'my-org-insert-jupyter-cell)
 
 (setq ob-jupyter-default-server-command
       "/home/micah/projects//.venv/bin/jupyter")
@@ -462,35 +375,63 @@
   (add-to-list 'org-src-lang-modes '("jupyter" . python))
   (add-to-list 'org-src-lang-modes '("jupyter-python" . python)))
 
-;; ===== FULL LSP IN C-c ' EDIT BUFFERS (OPTION 1 - RECOMMENDED) =====
-;; This gives you full LSP when you press C-c ' to edit a src block
-;; No polymode complications, rock solid!
+;; Enable LSP in org src edit buffers for Python
+(defun +org-src-enable-lsp-for-python ()
+  "Enable LSP and proper indentation for Python in org src blocks."
+  (when (and (derived-mode-p 'python-mode)
+             (not (bound-and-true-p lsp-mode)))
+    ;; Ensure electric indent works
+    (electric-indent-local-mode 1)
+    ;; Start LSP
+    (lsp-deferred)))
 
-(after! org-src
-  (add-hook 'org-src-mode-hook
+;; Apply to all org src mode buffers
+(add-hook 'org-src-mode-hook #'+org-src-enable-lsp-for-python)
+
+;; Alternative: if the above doesn't work, try this more aggressive approach
+;; (after! org-src
+;; (add-hook 'org-src-mode-hook
+;;           (lambda ()
+;;             (when (derived-mode-p 'python-mode)
+;;               ;; Force enable electric indent
+;;               (setq-local electric-indent-mode t)
+;;               (setq-local electric-indent-inhibit nil)
+;;               ;; Start LSP
+;;               (lsp-deferred)))))
+;; This gives you LSP support WITHOUT having to C-c ' into a separate buffer!
+;; Add these to your packages.el:
+;;   (package! polymode)
+;;   (package! poly-org)
+
+(use-package! polymode
+  :defer t)
+
+(use-package! poly-org
+  :after (org polymode)
+  :config
+  ;; Enable polymode in org buffers to treat src blocks as their own major modes
+  (add-hook 'org-mode-hook
             (lambda ()
-              (when (derived-mode-p 'python-mode)
-                ;; Force enable electric indent
-                (setq-local electric-indent-mode t)
-                (setq-local electric-indent-inhibit nil)
-                ;; Ensure we're in the right directory for LSP to find venv
-                (when-let ((info (org-src--edit-element)))
-                  (setq-local default-directory
-                              (file-name-directory (buffer-file-name (marker-buffer (car info))))))
-                ;; Start LSP with full features
-                (lsp-deferred)
-                ;; Enable all LSP UI features in src edit buffer
-                (setq-local lsp-ui-doc-enable t)
-                (setq-local lsp-ui-sideline-enable t)
-                (setq-local lsp-signature-auto-activate t)
-                (setq-local lsp-enable-symbol-highlighting t)
-                (setq-local lsp-lens-enable t)))))
-
-;; Add a helpful message about C-c '
-(defun +org-jupyter-remind-edit-keybind ()
-  "Remind user about C-c ' for full LSP."
-  (interactive)
-  (message "Tip: Press C-c ' in a src block for full LSP support!"))
-
-;; Optional: Show reminder occasionally
-;; (run-with-idle-timer 300 t #'+org-jupyter-remind-edit-keybind)
+              ;; Only enable if we have Python src blocks
+              (when (save-excursion
+                      (goto-char (point-min))
+                      (re-search-forward "^#\\+begin_src \\(python\\|jupyter\\)" nil t))
+                (poly-org-mode))))
+  
+  ;; Enable LSP in Python polymode chunks
+  (defun +org-polymode-enable-lsp ()
+    "Enable LSP in polymode Python chunks."
+    (when (and (derived-mode-p 'python-mode)
+               (not (bound-and-true-p lsp-mode)))
+      ;; Small delay to let polymode finish initialization
+      (run-with-idle-timer 0.1 nil
+                           (lambda (buf)
+                             (when (buffer-live-p buf)
+                               (with-current-buffer buf
+                                 (lsp-deferred))))
+                           (current-buffer))))
+  
+  (add-hook 'polymode-init-inner-hook #'+org-polymode-enable-lsp)
+  
+  ;; Improve navigation in polymode
+  (setq polymode-prefix-key (kbd "C-c n")))
