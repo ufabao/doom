@@ -12,3 +12,4 @@
 (package! jsonrpc)         ; JSON-RPC communication protocol
 (package! harpoon)
 (package! jupyter)
+(package! lsp-pyright)

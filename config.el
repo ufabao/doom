@@ -21,6 +21,24 @@
 ;; Default directory for org-mode files
 (setq org-directory "~/org/")
 
+;; ===== PYTHON DEVELOPMENT CONFIGURATION =====
+;; Enable LSP for Python files
+(add-hook 'python-mode-hook #'lsp!)
+
+;; Python indentation settings
+(after! python
+  (setq python-indent-offset 4)
+  (setq python-indent-guess-indent-offset nil)
+  ;; Ensure proper indentation behavior
+  (setq electric-indent-mode t))
+
+;; Configure Python LSP server (using pyright by default in Doom)
+(after! lsp-pyright
+  (setq lsp-pyright-auto-import-completions t
+        lsp-pyright-auto-search-paths t
+        lsp-pyright-use-library-code-for-types t
+        lsp-pyright-diagnostic-mode "workspace"))
+
 ;; ===== C/C++ DEVELOPMENT CONFIGURATION =====
 ;; Enable Language Server Protocol (LSP) for C++ development
 (add-hook 'c++-mode-hook #'lsp!)
@@ -278,7 +296,7 @@
 (setq major-mode-remap-alist
       '((c-mode . c-ts-mode)
         (c++-mode . c++-ts-mode)
-        (-mode . python-ts-mode)))
+        (python-mode . python-ts-mode)))
 
 ;; ===== ORG & JUPYTER CONFIGURATION =====
 
@@ -302,11 +320,11 @@
   (add-hook 'org-babel-after-execute-hook
             #'org-display-inline-images))
 
-;; Add a snippet to insert a Jupyter  block
+;; Add a snippet to insert a Jupyter python block
 (defun my-org-insert-jupyter-cell ()
-  "Insert a new jupyter- src block."
+  "Insert a new jupyter-python src block."
   (interactive)
-  (insert "#+begin_src jupyter :kernel pyvenv :session py :results output\n\n#+end_src\n")
+  (insert "#+begin_src jupyter-python :kernel pyvenv :session py :results output\n\n#+end_src\n")
   (forward-line -1))
 
 ;; Bind to local leader or a key
@@ -345,27 +363,38 @@
 
   (global-ligature-mode t))
 
+;; ===== ORG SRC BLOCK IMPROVEMENTS =====
 
-;; When editing src blocks, use real language major mode
+;; When editing src blocks, use real language major mode with proper indentation
 (setq org-src-tab-acts-natively t)
-(setq org-src-preserve-indentation t)
+(setq org-src-preserve-indentation nil)  ;; Changed to nil for better indentation
+(setq org-edit-src-content-indentation 0)  ;; No extra indentation in edit buffer
 
-;; Start LSP automatically in  src edit buffers
+;; Map jupyter source blocks to python-mode for LSP support
 (after! org
-  (add-hook 'org-src-mode-hook
-            (lambda ()
-              (when (derived-mode-p 'python-mode)
-                (lsp-deferred)))))
-
-(after! org
-  ;; Map 'jupyter' source blocks to 'python-mode'
-  ;; This ensures your existing LSP hook fires when editing these blocks
   (add-to-list 'org-src-lang-modes '("jupyter" . python))
-  (add-to-list 'org-src-lang-modes '("jupyter" . python)))
-(defun +org-src-enable-lsp-if-python ()
-  "Enable LSP for python src blocks in Org."
-  (when (derived-mode-p 'python-mode)
+  (add-to-list 'org-src-lang-modes '("jupyter-python" . python)))
+
+;; Enable LSP in org src edit buffers for Python
+(defun +org-src-enable-lsp-for-python ()
+  "Enable LSP and proper indentation for Python in org src blocks."
+  (when (and (derived-mode-p 'python-mode)
+             (not (bound-and-true-p lsp-mode)))
+    ;; Ensure electric indent works
+    (electric-indent-local-mode 1)
+    ;; Start LSP
     (lsp-deferred)))
 
-(add-hook 'org-src-mode-hook #'+org-src-enable-lsp-if-python)
-(add-hook 'org-src-mode-hook #'+org-jupyter-enable-lsp)
+;; Apply to all org src mode buffers
+(add-hook 'org-src-mode-hook #'+org-src-enable-lsp-for-python)
+
+;; Alternative: if the above doesn't work, try this more aggressive approach
+;; (after! org-src
+;; (add-hook 'org-src-mode-hook
+;;           (lambda ()
+;;             (when (derived-mode-p 'python-mode)
+;;               ;; Force enable electric indent
+;;               (setq-local electric-indent-mode t)
+;;               (setq-local electric-indent-inhibit nil)
+;;               ;; Start LSP
+;;               (lsp-deferred)))))
