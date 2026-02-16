@@ -328,31 +328,65 @@
   "Insert a new jupyter-python src block with VSCode-like behavior."
   (interactive)
   ;; Use :results value to show return values, not just print() output
-  (insert "#+begin_src jupyter-python :session py :results value\n\n#+end_src\n")
+  (insert "#+begin_src jupyter :kernel pyvenv :session py :results value\n\n#+end_src\n")
   (forward-line -1))
+
+;; Flag for deferred cell creation after async Jupyter execution
+(defvar my/org-jupyter-create-next-cell nil
+  "When non-nil, create a new cell after the current execution completes.")
 
 ;; Execute cell and create new cell below (like Shift-Enter in VSCode)
 (defun my-org-jupyter-execute-and-next ()
   "Execute current cell and create/move to next cell (VSCode Shift-Enter behavior)."
   (interactive)
-  (org-babel-execute-src-block)
-  ;; Wait a moment for execution to complete
-  (sit-for 0.1)
-  ;; Try to find next src block
-  (let ((current-pos (point)))
-    (if (re-search-forward "^#\\+begin_src" nil t)
-        ;; Found next block, go into it
+  (let ((has-next
+         (save-excursion
+           (when (org-in-src-block-p)
+             (re-search-forward "^#\\+end_src" nil t))
+           (re-search-forward "^#\\+begin_src" nil t))))
+    (if has-next
         (progn
+          (org-babel-execute-src-block)
+          ;; Move to next existing block
+          (when (org-in-src-block-p)
+            (re-search-forward "^#\\+end_src" nil t))
+          (re-search-forward "^#\\+begin_src" nil t)
           (forward-line 1)
           (beginning-of-line))
-      ;; No next block, create one
-      (goto-char current-pos)
-      (org-babel-next-src-block)  ;; Go to end of current block
-      (forward-line 1)
+      ;; No next block — flag for after-execute hook to create cell
+      ;; after results are inserted (handles async Jupyter execution)
+      (setq my/org-jupyter-create-next-cell t)
+      (org-babel-execute-src-block))))
+
+(defun my/org-jupyter-maybe-create-cell ()
+  "If flagged, create a new jupyter cell after the results block.
+Runs from `org-babel-after-execute-hook' so results are already inserted."
+  (when my/org-jupyter-create-next-cell
+    (setq my/org-jupyter-create-next-cell nil)
+    (let ((result-pos (org-babel-where-is-src-block-result)))
+      (if result-pos
+          (progn
+            (goto-char result-pos)
+            (let ((elem (org-element-at-point)))
+              ;; Skip #+RESULTS: keyword
+              (when (eq (org-element-type elem) 'keyword)
+                (goto-char (org-element-property :end elem))
+                (setq elem (org-element-at-point)))
+              ;; Skip the actual results content (drawer, fixed-width, etc.)
+              (when (memq (org-element-type elem)
+                          '(fixed-width example-block drawer latex-environment
+                            paragraph plain-list table))
+                (goto-char (org-element-property :end elem)))))
+        ;; Fallback: go past #+end_src
+        (when (org-in-src-block-p)
+          (re-search-forward "^#\\+end_src" nil t)))
+      (skip-chars-backward "\n ")
       (end-of-line)
-      (insert "\n\n")
+      (insert "\n\n\n")
       (my-org-insert-jupyter-cell)
-      (forward-line 1))))
+      (forward-line -1))))
+
+(add-hook 'org-babel-after-execute-hook #'my/org-jupyter-maybe-create-cell 'append)
 
 ;; Execute cell and stay in place (like Ctrl-Enter in VSCode)
 (defun my-org-jupyter-execute-and-stay ()
@@ -385,7 +419,7 @@
     (when (org-in-src-block-p)
       (re-search-backward "^#\\+begin_src" nil t))
     ;; Now find previous block
-    (if (re-search-backward "^#\\+begin_src" nil t 2)
+    (if (re-search-backward "^#\\+begin_src" nil t)
         (progn
           (forward-line 1)
           (beginning-of-line))
@@ -420,6 +454,36 @@
 
 (setq ob-jupyter-default-server-command
       "/home/micah/projects//.venv/bin/jupyter")
+;; Clean carriage-return progress bars (tqdm etc.) after execution.
+;; Simulates terminal behavior: only keeps the final state of each line.
+(defun my/org-babel-clean-cr-output ()
+  "Process carriage returns in results so tqdm etc. display cleanly."
+  (save-excursion
+    (when-let* ((res-beg (org-babel-where-is-src-block-result)))
+      (goto-char res-beg)
+      (let ((res-end (copy-marker
+                      (if (re-search-forward "^:END:\\|^$\\|^[^:#:|]" nil t)
+                          (match-beginning 0)
+                        (point-max)))))
+        (goto-char res-beg)
+        (while (re-search-forward "[\r\xd␍]" res-end t)
+          (let* ((lb (line-beginning-position))
+                 (le (line-end-position))
+                 (line (buffer-substring-no-properties lb le))
+                 (parts (split-string line "[\r\xd␍]+"))
+                 (last-part (car (last (seq-remove #'string-empty-p parts)))))
+            (when last-part
+              ;; Preserve org fixed-width prefix ": "
+              (when (and (string-prefix-p ": " line)
+                         (not (string-prefix-p ": " last-part)))
+                (setq last-part (concat ": " (string-trim-left last-part))))
+              (delete-region lb le)
+              (goto-char lb)
+              (insert last-part))))
+        (set-marker res-end nil)))))
+
+(add-hook 'org-babel-after-execute-hook #'my/org-babel-clean-cr-output)
+
 ;; Display inline images automatically after evaluating a src block
 (add-hook 'org-babel-after-execute-hook 'org-display-inline-images)
 
@@ -454,43 +518,189 @@
 
 ;; When editing src blocks, use real language major mode with proper indentation
 (setq org-src-tab-acts-natively t)
-(setq org-src-preserve-indentation nil)  ;; Changed to nil for better indentation
-(setq org-edit-src-content-indentation 0)  ;; No extra indentation in edit buffer
+(setq org-src-preserve-indentation nil)
+(setq org-edit-src-content-indentation 0)
+
+;; Edit src blocks in the SAME window (no split — feels seamless)
+(setq org-src-window-setup 'current-window)
 
 ;; Map jupyter source blocks to python-mode for LSP support
 (after! org
   (add-to-list 'org-src-lang-modes '("jupyter" . python))
   (add-to-list 'org-src-lang-modes '("jupyter-python" . python)))
 
-;; ===== FULL LSP IN C-c ' EDIT BUFFERS (OPTION 1 - RECOMMENDED) =====
-;; This gives you full LSP when you press C-c ' to edit a src block
-;; No polymode complications, rock solid!
+;; ===== SEAMLESS LSP EDITING IN ORG SRC BLOCKS =====
+;; How it works:
+;;   1. Edit buffer gets a .py file identity → pyright fully engages
+;;      (hover, completion, goto-def all need a file URI to work)
+;;   2. Previous blocks prepended as hidden preamble → cross-block context
+;;   3. Buffer narrowed to current block → org save only writes current block
+;;   4. LSP widens internally → sees full content for context-aware features
+;;
+;; Workflow:
+;;   gj/gk  — navigate between cells (org-mode, as before)
+;;   RET    — enter edit buffer with full LSP (normal mode, in a src block)
+;;   gj/gk  — exit edit + navigate to next/prev cell (from inside edit buffer)
+;;   C-RET  — execute block (works in both org and edit buffer)
+;;   S-RET  — execute + next (works in both org and edit buffer)
+;;   C-c '  — toggle edit buffer (standard org keybinding, also works)
+
+(defvar-local my/org-src-preamble-marker nil
+  "Marker at end of injected preamble in org-src edit buffer.")
+
+;; --- LSP setup in edit buffers ---
+(defun my/org-src-python-lsp-setup ()
+  "Set up Python LSP with full features and cross-block context."
+  (when (derived-mode-p 'python-mode 'python-ts-mode)
+    (setq-local electric-indent-mode t)
+    (setq-local electric-indent-inhibit nil)
+    (when-let* ((marker org-src--beg-marker)
+                (org-buf (marker-buffer marker))
+                (org-file (buffer-file-name org-buf))
+                (org-dir (file-name-directory org-file)))
+      (setq-local default-directory org-dir)
+      ;; Give buffer a .py file name so pyright fully engages
+      (setq-local buffer-file-name
+                  (expand-file-name
+                   (concat ".org-src-" (file-name-base org-file) ".py")
+                   org-dir))
+      (setq-local backup-inhibited t)
+      (setq-local +format-with :none) ;; don't auto-format shadow content
+      (set-buffer-modified-p nil)
+      ;; Inject previous blocks as hidden preamble for cross-block context
+      (my/org-src--inject-preamble)
+      ;; Start LSP with full features
+      (lsp-deferred)
+      (setq-local lsp-ui-doc-enable t)
+      (setq-local lsp-ui-sideline-enable t)
+      (setq-local lsp-signature-auto-activate t)
+      (setq-local lsp-enable-symbol-highlighting t))))
+
+(defun my/org-src--inject-preamble ()
+  "Prepend all previous Python/Jupyter blocks, then narrow to current block.
+LSP widens internally and sees the full content for context-aware features.
+Org-src save/exit respects narrowing and only writes back the current block."
+  (when-let* ((marker org-src--beg-marker)
+              (org-buf (marker-buffer marker))
+              (current-pos (marker-position marker)))
+    (let ((preamble ""))
+      (with-current-buffer org-buf
+        (save-excursion
+          (org-element-map (org-element-parse-buffer) 'src-block
+            (lambda (block)
+              (when (and (< (org-element-property :begin block) current-pos)
+                         (member (org-element-property :language block)
+                                 '("python" "jupyter-python" "jupyter")))
+                (setq preamble
+                      (concat preamble
+                              (org-element-property :value block)
+                              "\n")))))))
+      (when (> (length preamble) 0)
+        (save-excursion
+          (goto-char (point-min))
+          (let ((inhibit-read-only t))
+            (insert preamble)))
+        (setq my/org-src-preamble-marker
+              (copy-marker (+ (point-min) (length preamble))))
+        (narrow-to-region (marker-position my/org-src-preamble-marker)
+                          (point-max))))))
+
+;; --- Preamble cleanup: strip before save/exit so org never sees it ---
+
+(defadvice! my/org-src--exit-strip-preamble-a (&rest _)
+  "Delete preamble before exit so only current block is written to org."
+  :before #'org-edit-src-exit
+  (when (and (bound-and-true-p my/org-src-preamble-marker)
+             (marker-position my/org-src-preamble-marker))
+    (widen)
+    (let ((inhibit-read-only t))
+      (delete-region (point-min) (marker-position my/org-src-preamble-marker)))
+    (setq my/org-src-preamble-marker nil)))
+
+(defadvice! my/org-src--save-strip-preamble-a (fn &rest args)
+  "Strip preamble before save, then restore it so LSP keeps context."
+  :around #'org-edit-src-save
+  (if (and (bound-and-true-p my/org-src-preamble-marker)
+           (marker-position my/org-src-preamble-marker))
+      (let ((preamble-text
+             (save-restriction
+               (widen)
+               (buffer-substring-no-properties
+                (point-min)
+                (marker-position my/org-src-preamble-marker)))))
+        ;; Strip preamble
+        (widen)
+        (let ((inhibit-read-only t))
+          (delete-region (point-min) (marker-position my/org-src-preamble-marker)))
+        (setq my/org-src-preamble-marker nil)
+        ;; Save with clean content
+        (apply fn args)
+        ;; Restore preamble for continued editing with LSP context
+        (let ((inhibit-read-only t))
+          (save-excursion
+            (goto-char (point-min))
+            (insert preamble-text)))
+        (setq my/org-src-preamble-marker
+              (copy-marker (+ (point-min) (length preamble-text))))
+        (narrow-to-region (marker-position my/org-src-preamble-marker)
+                          (point-max)))
+    (apply fn args)))
 
 (after! org-src
-  (add-hook 'org-src-mode-hook
-            (lambda ()
-              (when (derived-mode-p 'python-mode)
-                ;; Force enable electric indent
-                (setq-local electric-indent-mode t)
-                (setq-local electric-indent-inhibit nil)
-                ;; Ensure we're in the right directory for LSP to find venv
-                (when-let ((info (org-src--edit-element)))
-                  (setq-local default-directory
-                              (file-name-directory (buffer-file-name (marker-buffer (car info))))))
-                ;; Start LSP with full features
-                (lsp-deferred)
-                ;; Enable all LSP UI features in src edit buffer
-                (setq-local lsp-ui-doc-enable t)
-                (setq-local lsp-ui-sideline-enable t)
-                (setq-local lsp-signature-auto-activate t)
-                (setq-local lsp-enable-symbol-highlighting t)
-                (setq-local lsp-lens-enable t)))))
+  (add-hook 'org-src-mode-hook #'my/org-src-python-lsp-setup))
 
-;; Add a helpful message about C-c '
-(defun +org-jupyter-remind-edit-keybind ()
-  "Remind user about C-c ' for full LSP."
+;; --- Smart RET: enter edit buffer when in a src block ---
+(defun my/org-smart-return ()
+  "In a src block, open the edit buffer with LSP. Otherwise, default org RET."
   (interactive)
-  (message "Tip: Press C-c ' in a src block for full LSP support!"))
+  (if (org-in-src-block-p)
+      (org-edit-special)
+    (+org/dwim-at-point)))
 
-;; Optional: Show reminder occasionally
-;; (run-with-idle-timer 300 t #'+org-jupyter-remind-edit-keybind)
+(after! evil-org
+  (map! :map evil-org-mode-map
+        :n [return] #'my/org-smart-return
+        :n "RET"    #'my/org-smart-return))
+
+;; --- Mirror navigation/execution keys inside the edit buffer ---
+
+(defun my/org-src-exit-and-next ()
+  "Exit edit buffer and jump to next cell."
+  (interactive)
+  (org-edit-src-exit)
+  (my-org-jupyter-next-cell))
+
+(defun my/org-src-exit-and-prev ()
+  "Exit edit buffer and jump to previous cell."
+  (interactive)
+  (org-edit-src-exit)
+  (my-org-jupyter-prev-cell))
+
+(defun my/org-src-execute-stay ()
+  "Execute the block from within the edit buffer, staying in edit mode."
+  (interactive)
+  (org-edit-src-save)
+  (org-edit-src-exit)
+  (org-babel-execute-src-block)
+  (org-edit-special))
+
+(defun my/org-src-execute-and-next ()
+  "Execute the block and move to next cell (exit edit buffer)."
+  (interactive)
+  (org-edit-src-save)
+  (org-edit-src-exit)
+  (my-org-jupyter-execute-and-next))
+
+(after! org-src
+  (map! :map org-src-mode-map
+        :n  "g j"        #'my/org-src-exit-and-next
+        :n  "g k"        #'my/org-src-exit-and-prev
+        :ni "C-<return>" #'my/org-src-execute-stay
+        :ni "S-<return>" #'my/org-src-execute-and-next))
+
+(use-package! org-modern
+  :hook (org-mode . org-modern-mode)
+  :config
+  (setq org-modern-block-fringe nil
+        org-modern-block-name nil  ;; hides the language name too if you want
+        org-modern-hide-stars t))

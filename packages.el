@@ -15,3 +15,4 @@
 (package! lsp-pyright)
 ;; (package! polymode)
 ;; (package! poly-org)
+(package! org-modern)
