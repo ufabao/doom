@@ -58,7 +58,7 @@
 (after! lsp-mode
   (setq lsp-clients-clangd-executable "clangd")
   (setq lsp-restart 'auto-restart)
-  (setq lsp-keep-workspace-alive nil)
+  (setq lsp-keep-workspace-alive t)
 
   (add-hook 'c++-mode-hook #'lsp-inlay-hints-mode)
 
@@ -579,29 +579,36 @@ Runs from `org-babel-after-execute-hook' so results are already inserted."
 (defun my/org-src--inject-preamble ()
   "Prepend all previous Python/Jupyter blocks, then narrow to current block.
 LSP widens internally and sees the full content for context-aware features.
-Org-src save/exit respects narrowing and only writes back the current block."
+Org-src save/exit respects narrowing and only writes back the current block.
+Uses fast regex scan instead of full org-element parse."
   (when-let* ((marker org-src--beg-marker)
               (org-buf (marker-buffer marker))
               (current-pos (marker-position marker)))
-    (let ((preamble ""))
-      (with-current-buffer org-buf
-        (save-excursion
-          (org-element-map (org-element-parse-buffer) 'src-block
-            (lambda (block)
-              (when (and (< (org-element-property :begin block) current-pos)
-                         (member (org-element-property :language block)
-                                 '("python" "jupyter-python" "jupyter")))
-                (setq preamble
-                      (concat preamble
-                              (org-element-property :value block)
-                              "\n")))))))
-      (when (> (length preamble) 0)
+    (let ((preamble
+           (with-current-buffer org-buf
+             (save-excursion
+               (save-restriction
+                 (widen)
+                 (goto-char (point-min))
+                 (let ((parts nil))
+                   (while (re-search-forward
+                           "^#\\+begin_src\\s-+\\(jupyter\\(?:-python\\)?\\|python\\)\\b"
+                           current-pos t)
+                     (forward-line 1)
+                     (let ((body-start (point)))
+                       (when (re-search-forward "^#\\+end_src\\b" current-pos t)
+                         (push (buffer-substring-no-properties
+                                body-start (line-beginning-position))
+                               parts))))
+                   (when parts
+                     (mapconcat #'identity (nreverse parts) "\n"))))))))
+      (when (and preamble (> (length preamble) 0))
         (save-excursion
           (goto-char (point-min))
           (let ((inhibit-read-only t))
-            (insert preamble)))
+            (insert preamble "\n")))
         (setq my/org-src-preamble-marker
-              (copy-marker (+ (point-min) (length preamble))))
+              (copy-marker (+ (point-min) (length preamble) 1)))
         (narrow-to-region (marker-position my/org-src-preamble-marker)
                           (point-max))))))
 
@@ -648,6 +655,55 @@ Org-src save/exit respects narrowing and only writes back the current block."
 
 (after! org-src
   (add-hook 'org-src-mode-hook #'my/org-src-python-lsp-setup))
+
+;; --- Pre-warm pyright so org-src edit buffers open instantly ---
+;; Creates a hidden buffer with LSP connected on org-mode load.
+;; Since lsp-keep-workspace-alive is t, pyright stays running and
+;; subsequent org-edit-special calls connect to it immediately.
+
+(defvar-local my/org-src--prewarm-buffer nil
+  "Hidden buffer keeping pyright warm for this org file.")
+
+(defun my/org-src-prewarm-lsp ()
+  "Start pyright in the background so org-src edit buffers connect instantly."
+  (when-let* ((org-file buffer-file-name)
+              (org-dir (file-name-directory org-file))
+              (buf-name (format " *pyright:%s*" (file-name-base org-file))))
+    (unless (and (buffer-live-p my/org-src--prewarm-buffer)
+                 (with-current-buffer my/org-src--prewarm-buffer
+                   (bound-and-true-p lsp-mode)))
+      (let ((buf (get-buffer-create buf-name)))
+        (with-current-buffer buf
+          (unless (bound-and-true-p lsp-mode)
+            (python-mode)
+            (setq-local buffer-file-name
+                        (expand-file-name
+                         (concat ".org-src-warm-" (file-name-base org-file) ".py")
+                         org-dir))
+            (setq-local default-directory org-dir)
+            (setq-local backup-inhibited t)
+            (setq-local +format-with :none)
+            (insert "# prewarm\n")
+            (set-buffer-modified-p nil)
+            (lsp-deferred)))
+        (setq my/org-src--prewarm-buffer buf)))))
+
+(add-hook 'org-mode-hook
+          (lambda ()
+            ;; Start pyright after 2s idle so it doesn't block org file loading
+            (let ((buf (current-buffer)))
+              (run-with-idle-timer
+               2 nil
+               (lambda ()
+                 (when (buffer-live-p buf)
+                   (with-current-buffer buf
+                     (my/org-src-prewarm-lsp))))))
+            ;; Clean up prewarm buffer when org buffer is killed
+            (add-hook 'kill-buffer-hook
+                      (lambda ()
+                        (when (buffer-live-p my/org-src--prewarm-buffer)
+                          (kill-buffer my/org-src--prewarm-buffer)))
+                      nil t)))
 
 ;; --- Smart RET: enter edit buffer when in a src block ---
 (defun my/org-smart-return ()
