@@ -16,3 +16,10 @@
 ;; (package! polymode)
 ;; (package! poly-org)
 (package! org-modern)
+(package! corfu-terminal)
+
+;; Lean 4 support
+(package! lean4-mode
+  :recipe (:host github
+           :repo "leanprover/lean4-mode"
+           :files ("*.el" "data")))

@@ -7,7 +7,7 @@
 ;; Font settings - using JetBrains Mono with Nerd Font support for icons
 (setq doom-font (font-spec
                  :family "JetBrainsMono Nerd Font"
-                 :size 16
+                 :size 14
                  :weight 'regular))
 
 ;; Color theme - Tokyo Night provides a dark, modern appearance
@@ -21,13 +21,20 @@
 ;; Default directory for org-mode files
 (setq org-directory "~/org/")
 
+;; ===== GLOBAL INDENTATION =====
+;; Use 2-space indentation everywhere, no hard tabs
+(setq-default tab-width 2
+              indent-tabs-mode nil
+              standard-indent 2
+              evil-shift-width 2)
+
 ;; ===== PYTHON DEVELOPMENT CONFIGURATION =====
 ;; Enable LSP for Python files
 (add-hook 'python-mode-hook #'lsp!)
 
 ;; Python indentation settings
 (after! python
-  (setq python-indent-offset 4)
+  (setq python-indent-offset 2)
   (setq python-indent-guess-indent-offset nil)
   ;; Ensure proper indentation behavior
   (setq electric-indent-mode t))
@@ -38,6 +45,12 @@
         lsp-pyright-auto-search-paths t
         lsp-pyright-use-library-code-for-types t
         lsp-pyright-diagnostic-mode "workspace"))
+
+;; Use ruff as the Python formatter (format-on-save via +onsave flag)
+;; Apheleia already defines a `ruff` formatter with --stdin-filename;
+;; this just tells Doom to use it instead of the default `black`.
+(after! python
+  (set-formatter! 'ruff :modes '(python-mode python-ts-mode)))
 
 ;; ===== C/C++ DEVELOPMENT CONFIGURATION =====
 ;; Enable Language Server Protocol (LSP) for C++ development
@@ -96,27 +109,32 @@
 
   ;; Configure lsp-ui-doc for hovering information
   (setq lsp-ui-doc-enable t
-        lsp-ui-doc-show-with-cursor t
-        lsp-ui-doc-show-with-mouse t
-        lsp-ui-doc-delay 0.2              ;; Show faster
-        lsp-ui-doc-max-width 120          ;; Wider to show more info
-        lsp-ui-doc-max-height 30          ;; Taller to show more lines
-        lsp-ui-doc-include-signature t    ;; Include function signatures
-        lsp-ui-doc-show-with-cursor nil   ;; Don't show automatically with cursor
-        lsp-ui-doc-show-with-mouse t)     ;; Show on mouse hover
-
-  (setq lsp-ui-doc-position 'at-point)
-  (setq lsp-ui-doc-show-with-cursor t)
+        lsp-ui-doc-delay 0.2
+        lsp-ui-doc-max-width 120
+        lsp-ui-doc-max-height 30
+        lsp-ui-doc-include-signature t)
+  ;; Child frames only work in GUI; fall back to a plain window in terminal
+  ;; Auto-show disabled — use K to trigger manually
+  (if (display-graphic-p)
+      (setq lsp-ui-doc-use-childframe t
+            lsp-ui-doc-position 'at-point
+            lsp-ui-doc-show-with-cursor nil
+            lsp-ui-doc-show-with-mouse nil)
+    (setq lsp-ui-doc-use-childframe nil
+          lsp-ui-doc-position 'bottom
+          lsp-ui-doc-show-with-cursor nil
+          lsp-ui-doc-show-with-mouse nil))
 
   ;; Ensure parameter hints still work but are better styled
   (setq lsp-inlay-hint-enable t)
   (setq lsp-inlay-hints-parameters t)
   (setq lsp-inlay-hints-types t)
   (setq lsp-diagnostics-provider :flycheck)
-  (setq lsp-eldoc-enable-hover t)
-  (setq lsp-eldoc-render-all t)  ;; Show all eldoc information
+  ;; lsp-ui-doc handles hover display; don't also dump it into the echo area
+  (setq lsp-eldoc-enable-hover nil)
+  (setq lsp-eldoc-render-all nil)
   (setq lsp-modeline-diagnostics-enable t)
-  (setq lsp-signature-auto-activate t))
+  (setq lsp-signature-auto-activate nil))
 
 ;; Enable LSP for CMake files
 (add-hook 'cmake-mode-hook #'lsp!)
@@ -183,6 +201,13 @@
   (setq company-clang-insert-arguments t)
   (setq company-dabbrev-downcase nil))
 
+;; ===== TERMINAL COMPLETION RENDERING =====
+;; corfu uses child frames by default which don't work in -nw;
+;; corfu-terminal replaces that with overlay-based rendering
+(unless (display-graphic-p)
+  (after! corfu
+    (corfu-terminal-mode +1)))
+
 ;; ===== SYSTEM INTEGRATION =====
 ;; Clipboard integration for Wayland systems
 (cond
@@ -204,7 +229,10 @@
 (use-package! flycheck-inline
   :after flycheck
   :config
-  (global-flycheck-inline-mode))
+  (global-flycheck-inline-mode)
+  (set-face-attribute 'flycheck-inline-error nil :box nil)
+  (set-face-attribute 'flycheck-inline-warning nil :box nil)
+  (set-face-attribute 'flycheck-inline-info nil :box nil))
 
 ;; Enhanced error/warning display with custom styling
 (after! flycheck
@@ -293,17 +321,21 @@
 
 ;; 3. Tree-Sitter Support
 ;; Ensure we prioritize the better syntax highlighting if available
+;; Doom's +tree-sitter flag handles python tree-sitter automatically.
+;; Remapping python-mode breaks jupyter REPL association.
 (setq major-mode-remap-alist
       '((c-mode . c-ts-mode)
-        (c++-mode . c++-ts-mode)
-        (python-mode . python-ts-mode)))
+        (c++-mode . c++-ts-mode)))
 
 ;; ===== ORG & JUPYTER CONFIGURATION =====
 
 (use-package! jupyter
   :after org
   :config
-  (require 'ob-jupyter))
+  (require 'ob-jupyter)
+  ;; Disable :async for jupyter blocks (incompatible with :session)
+  (setq org-babel-default-header-args:jupyter-python
+        '((:async . "no"))))
 
 (after! org
   (setq org-babel-load-languages
@@ -322,6 +354,52 @@
 
 ;; ===== VSCODE-LIKE JUPYTER BEHAVIOR =====
 
+;; --- Black formatting helpers ---
+
+(defun my/format-with-ruff ()
+  "Format the visible buffer content with ruff. No-op on failure."
+  (let* ((fname (or buffer-file-name "input.py"))
+         (input (buffer-string))
+         (formatted
+          (with-temp-buffer
+            (insert input)
+            (when (zerop (call-process-region (point-min) (point-max)
+                                              "ruff" t '(t nil) nil
+                                              "format" "--stdin-filename" fname "-"))
+              (buffer-string)))))
+    (when (and formatted (not (string= input formatted)))
+      (let ((p (point)))
+        (delete-region (point-min) (point-max))
+        (insert formatted)
+        (goto-char (min p (point-max)))))))
+
+(defun my/org-format-src-block-with-ruff ()
+  "Format the current Python/Jupyter src block in-place with ruff."
+  (when (org-in-src-block-p)
+    (let* ((info (org-babel-get-src-block-info 'light))
+           (lang (car info)))
+      (when (member lang '("python" "jupyter" "jupyter-python"))
+        (save-excursion
+          (re-search-backward "^[ \t]*#\\+begin_src" nil t)
+          (forward-line 1)
+          (let ((code-beg (point)))
+            (re-search-forward "^[ \t]*#\\+end_src" nil t)
+            (beginning-of-line)
+            (let* ((code-end (point))
+                   (fname (or buffer-file-name "input.py"))
+                   (input (buffer-substring-no-properties code-beg code-end))
+                   (formatted
+                    (with-temp-buffer
+                      (insert input)
+                      (when (zerop (call-process-region (point-min) (point-max)
+                                                        "ruff" t '(t nil) nil
+                                                        "format" "--stdin-filename" fname "-"))
+                        (buffer-string)))))
+              (when (and formatted (not (string= input formatted)))
+                (delete-region code-beg code-end)
+                (goto-char code-beg)
+                (insert formatted)))))))))
+
 ;; Show return values like VSCode (use :results value instead of :results output)
 ;; This will display the last expression's value automatically
 (defun my-org-insert-jupyter-cell ()
@@ -339,6 +417,7 @@
 (defun my-org-jupyter-execute-and-next ()
   "Execute current cell and create/move to next cell (VSCode Shift-Enter behavior)."
   (interactive)
+  (my/org-format-src-block-with-ruff)
   (let ((has-next
          (save-excursion
            (when (org-in-src-block-p)
@@ -656,6 +735,14 @@ Uses fast regex scan instead of full org-element parse."
 (after! org-src
   (add-hook 'org-src-mode-hook #'my/org-src-python-lsp-setup))
 
+;; Fix: LSP completion positions refer to the full (widened) buffer,
+;; but org-src narrowing makes those positions inaccessible.
+(defadvice! my/lsp-completion-guess-prefix-widen-a (fn &rest args)
+  :around #'lsp-completion--guess-prefix
+  (save-restriction
+    (widen)
+    (apply fn args)))
+
 ;; --- Pre-warm pyright so org-src edit buffers open instantly ---
 ;; Creates a hidden buffer with LSP connected on org-mode load.
 ;; Since lsp-keep-workspace-alive is t, pyright stays running and
@@ -743,6 +830,7 @@ Uses fast regex scan instead of full org-element parse."
 (defun my/org-src-execute-and-next ()
   "Execute the block and move to next cell (exit edit buffer)."
   (interactive)
+  (my/format-with-ruff)
   (org-edit-src-save)
   (org-edit-src-exit)
   (my-org-jupyter-execute-and-next))
@@ -754,9 +842,130 @@ Uses fast regex scan instead of full org-element parse."
         :ni "C-<return>" #'my/org-src-execute-stay
         :ni "S-<return>" #'my/org-src-execute-and-next))
 
+;; ===== LEAN 4 CONFIGURATION =====
+(use-package! lean4-mode
+  :commands lean4-mode
+  :hook (lean4-mode . (lambda ()
+                        (set-input-method "Lean")))
+  :config
+  (setq lean4-keybinding-lean4-toggle-info (kbd "C-c C-i")))
+
+(after! lean4-mode
+  (add-hook 'lean4-mode-hook #'lsp!)
+
+  ;; --- Suppress inlayHint/refresh spam ---
+  (after! lsp-mode
+    (add-to-list 'warning-suppress-types '(lsp-mode)))
+
+  ;; --- Persistent #eval/#check virtual-line overlays ---
+  ;;
+  ;; Data source: flycheck-current-errors (reliable — squiggles proved it works).
+  ;; Triggered by: flycheck-after-syntax-check-hook (primary) and a deferred
+  ;; lsp-diagnostics-updated-hook (backup for incremental lean4 elaboration,
+  ;; where successive LSP pushes each add one more #eval result).
+  ;; Results accumulate in a per-buffer cache (line# -> string) so overlays
+  ;; survive between check cycles.
+  ;; Cleanup: before-change-functions fires BEFORE text is removed, so we can
+  ;; still locate the overlay by position and delete it immediately.
+  ;; evaporate t is intentionally omitted — zero-width overlays are already
+  ;; "empty" at creation, which causes Emacs to evaporate them immediately.
+
+  (defvar-local my/lean4-eval-overlays nil)
+  (defvar-local my/lean4-eval-cache nil)   ; hash: line-number (0-indexed) -> string
+
+  (defun my/lean4-redraw-eval-overlays ()
+    "Delete all eval overlays and recreate them from the result cache."
+    (mapc #'delete-overlay my/lean4-eval-overlays)
+    (setq my/lean4-eval-overlays nil)
+    (when my/lean4-eval-cache
+      (maphash
+       (lambda (line msg)
+         (save-excursion
+           (goto-char (point-min))
+           (forward-line line)
+           (when (looking-at ".*#\\(eval\\|check\\|reduce\\)")
+             (let ((ov (make-overlay (line-end-position) (line-end-position))))
+               (overlay-put ov 'after-string
+                            (concat "\n"
+                                    (propertize (concat "▶ " msg)
+                                                'face '(:foreground "#6a9955"
+                                                        :slant italic
+                                                        :height 0.9))))
+               (overlay-put ov 'my/lean4-eval t)
+               (push ov my/lean4-eval-overlays)))))
+       my/lean4-eval-cache)))
+
+  (defun my/lean4-update-eval-overlays-from-flycheck ()
+    "Populate cache from flycheck info/hint errors on #eval lines, then redraw."
+    (when (derived-mode-p 'lean4-mode)
+      (dolist (err flycheck-current-errors)
+        (when (memq (flycheck-error-level err) '(info hint))
+          (let ((line (1- (flycheck-error-line err)))
+                (msg  (flycheck-error-message err)))
+            (save-excursion
+              (goto-char (point-min))
+              (forward-line line)
+              (when (looking-at ".*#\\(eval\\|check\\|reduce\\)")
+                (puthash line msg my/lean4-eval-cache))))))
+      (my/lean4-redraw-eval-overlays)))
+
+  (defun my/lean4-maybe-update-overlays ()
+    "Deferred overlay update: lets flycheck process the new LSP diagnostics first."
+    (when (derived-mode-p 'lean4-mode)
+      (let ((buf (current-buffer)))
+        (run-with-idle-timer
+         0.3 nil
+         (lambda ()
+           (when (buffer-live-p buf)
+             (with-current-buffer buf
+               (my/lean4-update-eval-overlays-from-flycheck))))))))
+
+  (defun my/lean4-eval-before-change (beg end)
+    "Remove overlays and cache entries for lines about to be edited or deleted."
+    (when (or my/lean4-eval-overlays my/lean4-eval-cache)
+      (save-excursion
+        (let ((pos-beg (progn (goto-char beg) (line-beginning-position)))
+              (pos-end (progn (goto-char end) (line-end-position))))
+          (setq my/lean4-eval-overlays
+                (seq-filter
+                 (lambda (ov)
+                   (if (and (overlay-buffer ov)
+                            (<= pos-beg (overlay-start ov) pos-end))
+                       (progn (delete-overlay ov) nil)
+                     t))
+                 my/lean4-eval-overlays))
+          (when my/lean4-eval-cache
+            (goto-char pos-beg)
+            (let ((l1 (1- (line-number-at-pos))))
+              (goto-char pos-end)
+              (cl-loop for l from l1 to (1- (line-number-at-pos))
+                       do (remhash l my/lean4-eval-cache))))))))
+
+  (defun my/lean4-setup-eval-overlays ()
+    "Initialize the eval-overlay system for this lean4 buffer."
+    (setq-local my/lean4-eval-cache (make-hash-table :test 'eql))
+    (add-hook 'flycheck-after-syntax-check-hook
+              #'my/lean4-update-eval-overlays-from-flycheck nil t)
+    (add-hook 'lsp-diagnostics-updated-hook
+              #'my/lean4-maybe-update-overlays nil t)
+    (add-hook 'before-change-functions #'my/lean4-eval-before-change nil t)
+    (face-remap-add-relative 'flycheck-info '(:underline nil)))
+
+  (add-hook 'lean4-mode-hook #'my/lean4-setup-eval-overlays)
+
+  ;; --- Suppress corfu on #eval/#check lines ---
+  (after! corfu
+    (defadvice! my/lean4-suppress-corfu-on-eval-a (&rest _)
+      :before-until #'corfu--auto-complete
+      (and (derived-mode-p 'lean4-mode)
+           (save-excursion
+             (beginning-of-line)
+             (looking-at ".*#\\(eval\\|check\\|reduce\\)"))))))
+
+;; Keep org-modern separate since it's unrelated
 (use-package! org-modern
   :hook (org-mode . org-modern-mode)
   :config
   (setq org-modern-block-fringe nil
-        org-modern-block-name nil  ;; hides the language name too if you want
+        org-modern-block-name nil
         org-modern-hide-stars t))
