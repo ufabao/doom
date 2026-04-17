@@ -400,13 +400,10 @@
                 (goto-char code-beg)
                 (insert formatted)))))))))
 
-;; Show return values like VSCode (use :results value instead of :results output)
-;; This will display the last expression's value automatically
 (defun my-org-insert-jupyter-cell ()
-  "Insert a new jupyter-python src block with VSCode-like behavior."
+  "Insert a new jupyter-python src block."
   (interactive)
-  ;; Use :results value to show return values, not just print() output
-  (insert "#+begin_src jupyter :kernel pyvenv :session py :results value\n\n#+end_src\n")
+  (insert "#+begin_src jupyter :kernel pyvenv :session py :results output\n\n#+end_src\n")
   (forward-line -1))
 
 ;; Flag for deferred cell creation after async Jupyter execution
@@ -532,7 +529,7 @@ Runs from `org-babel-after-execute-hook' so results are already inserted."
       :desc "Execute and next" "i e" #'my-org-jupyter-execute-and-next)
 
 (setq ob-jupyter-default-server-command
-      "/home/micah/projects//.venv/bin/jupyter")
+      "/home/micah/projects/python/.venv/bin/jupyter")
 ;; Clean carriage-return progress bars (tqdm etc.) after execution.
 ;; Simulates terminal behavior: only keeps the final state of each line.
 (defun my/org-babel-clean-cr-output ()
@@ -792,7 +789,7 @@ Uses fast regex scan instead of full org-element parse."
                           (kill-buffer my/org-src--prewarm-buffer)))
                       nil t)))
 
-;; --- Smart RET: enter edit buffer when in a src block ---
+;; --- Smart keys: enter edit buffer (with LSP) when in a src block ---
 (defun my/org-smart-return ()
   "In a src block, open the edit buffer with LSP. Otherwise, default org RET."
   (interactive)
@@ -800,10 +797,26 @@ Uses fast regex scan instead of full org-element parse."
       (org-edit-special)
     (+org/dwim-at-point)))
 
+(defun my/org-smart-insert ()
+  "In a src block, open edit buffer in insert mode. Otherwise normal evil-insert."
+  (interactive)
+  (if (org-in-src-block-p)
+      (progn (org-edit-special) (evil-insert-state))
+    (evil-insert-state)))
+
+(defun my/org-smart-append ()
+  "In a src block, open edit buffer in insert mode. Otherwise normal evil-append."
+  (interactive)
+  (if (org-in-src-block-p)
+      (progn (org-edit-special) (evil-insert-state))
+    (evil-append 1)))
+
 (after! evil-org
   (map! :map evil-org-mode-map
         :n [return] #'my/org-smart-return
-        :n "RET"    #'my/org-smart-return))
+        :n "RET"    #'my/org-smart-return
+        :n "i"      #'my/org-smart-insert
+        :n "a"      #'my/org-smart-append))
 
 ;; --- Mirror navigation/execution keys inside the edit buffer ---
 
@@ -839,6 +852,7 @@ Uses fast regex scan instead of full org-element parse."
   (map! :map org-src-mode-map
         :n  "g j"        #'my/org-src-exit-and-next
         :n  "g k"        #'my/org-src-exit-and-prev
+        :n  [escape]     #'org-edit-src-exit   ; ESC in normal mode → back to org
         :ni "C-<return>" #'my/org-src-execute-stay
         :ni "S-<return>" #'my/org-src-execute-and-next))
 
