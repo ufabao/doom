@@ -46,11 +46,136 @@
         lsp-pyright-use-library-code-for-types t
         lsp-pyright-diagnostic-mode "workspace"))
 
-;; Use ruff as the Python formatter (format-on-save via +onsave flag)
-;; Apheleia already defines a `ruff` formatter with --stdin-filename;
-;; this just tells Doom to use it instead of the default `black`.
+
+;; ===== PYTHON .PY FILE + JUPYTER REPL WORKFLOW =====
+
+;; FIX 1: Emacs 30 pcase-let*/state void-variable bug.
+;; Must use after! jupyter-repl (not after! jupyter) because the function lives
+;; in jupyter-repl.el, which jupyter.el requires before providing 'jupyter.
+;; The function is defined early but only *called* when a REPL starts.
+(defun my/jupyter-repl-sync-safe (fn &rest args)
+  (condition-case nil (apply fn args) (void-variable nil)))
+
+(after! jupyter-repl
+  (advice-add 'jupyter-repl-sync-execution-state :around #'my/jupyter-repl-sync-safe))
+
+;; FIX 2: python-mode vs python-ts-mode association mismatch.
+;; jupyter-kernel-language-mode detects the mode by running set-auto-mode on a
+;; temp .py buffer, which may return python-ts-mode if tree-sitter is active,
+;; while the user's file is in python-mode (or vice versa).
+;; The eq check in jupyter-repl-associate-buffer then silently skips association.
+(defun my/jupyter-repl-associate-python-a (fn client)
+  (if (and (object-of-class-p client 'jupyter-repl-client)
+           (memq major-mode '(python-mode python-ts-mode))
+           (memq (jupyter-kernel-language-mode client) '(python-mode python-ts-mode)))
+      (progn
+        (setq-local jupyter-current-client client)
+        (unless jupyter-repl-interaction-mode
+          (jupyter-repl-interaction-mode)))
+    (funcall fn client)))
+
+(after! jupyter-repl
+  (advice-add 'jupyter-repl-associate-buffer :around #'my/jupyter-repl-associate-python-a))
+
+;; FIX 3: Route eval output to the REPL buffer (VS Code interactive window style)
+;; rather than as overlays in the source buffer.
+(add-hook 'jupyter-repl-interaction-mode-hook
+          (lambda ()
+            (when jupyter-repl-interaction-mode
+              (setq-local jupyter-repl-echo-eval-p t))))
+
+(use-package! code-cells
+  :hook (python-mode . code-cells-mode))
+
+(defun my/python-start-repl ()
+  "Start a Jupyter REPL, associate this Python buffer, and show the REPL sidebar."
+  (interactive)
+  (let ((src-buf (current-buffer)))
+    ;; call-interactively sets associate-buffer=t; our advice makes the mode check lenient
+    (call-interactively #'jupyter-run-repl)
+    ;; jupyter-run-repl switched to the REPL buffer; switch back and open sidebar
+    (switch-to-buffer src-buf)
+    (my/python-toggle-repl-side-window)))
+
+(defun my/python-insert-cell ()
+  "Insert a # %% cell separator at the start of the current line."
+  (interactive)
+  (beginning-of-line)
+  (insert "# %%\n"))
+
+(defun my/python-eval-cell ()
+  "Evaluate the current # %% cell in the Jupyter REPL."
+  (interactive)
+  (unless (bound-and-true-p jupyter-repl-interaction-mode)
+    (user-error "No Jupyter REPL associated — run SPC j j first"))
+  ;; no-header=t strips the # %% separator line from the sent code
+  (let ((bounds (code-cells--bounds nil nil t)))
+    (jupyter-eval-region nil (car bounds) (cadr bounds))))
+
+(defun my/python-eval-cell-and-next ()
+  "Evaluate the current # %% cell and jump to the next one."
+  (interactive)
+  (my/python-eval-cell)
+  (code-cells-forward-cell))
+
+(defun my/python-eval-region ()
+  "Evaluate the selected region in the Jupyter REPL."
+  (interactive)
+  (unless (bound-and-true-p jupyter-repl-interaction-mode)
+    (user-error "No Jupyter REPL associated — run SPC j j first"))
+  (if (use-region-p)
+      (jupyter-eval-region nil (region-beginning) (region-end))
+    (user-error "No active region")))
+
+(defun my/python-eval-buffer ()
+  "Evaluate the entire buffer in the Jupyter REPL."
+  (interactive)
+  (unless (bound-and-true-p jupyter-repl-interaction-mode)
+    (user-error "No Jupyter REPL associated — run SPC j j first"))
+  (jupyter-eval-region nil (point-min) (point-max)))
+
+(defun my/python-show-repl ()
+  "Pop to the associated Jupyter REPL buffer."
+  (interactive)
+  (if (bound-and-true-p jupyter-repl-interaction-mode)
+      (jupyter-repl-pop-to-buffer)
+    (user-error "No Jupyter REPL associated — run SPC j j first")))
+
+(defun my/python-toggle-repl-side-window ()
+  "Show the associated Jupyter REPL in a right-side window, or close it."
+  (interactive)
+  (let ((repl-buf
+         (or (when (bound-and-true-p jupyter-current-client)
+               (ignore-errors (oref jupyter-current-client buffer)))
+             (cl-find-if (lambda (b)
+                           (with-current-buffer b
+                             (eq major-mode 'jupyter-repl-mode)))
+                         (buffer-list)))))
+    (if repl-buf
+        (let ((repl-win (get-buffer-window repl-buf)))
+          (if repl-win
+              (delete-window repl-win)
+            (display-buffer-in-side-window
+             repl-buf '((side . right) (slot . 0) (window-width . 0.4)))))
+      (user-error "No Jupyter REPL running — use SPC j j to start one"))))
+
 (after! python
-  (set-formatter! 'ruff :modes '(python-mode python-ts-mode)))
+  (map! :map python-mode-map
+        :leader
+        :prefix ("j" . "jupyter")
+        :desc "Start REPL"           "j" #'my/python-start-repl
+        :desc "Associate buffer"     "a" #'jupyter-repl-associate-buffer
+        :desc "Show REPL"            "o" #'my/python-show-repl
+        :desc "Toggle REPL sidebar"  "t" #'my/python-toggle-repl-side-window
+        :desc "Restart kernel"       "r" #'jupyter-repl-restart-kernel
+        :desc "Interrupt kernel"     "x" #'jupyter-kernel-interrupt
+        :desc "Insert # %% cell"     "i" #'my/python-insert-cell
+        :desc "Eval cell & next"     "e" #'my/python-eval-cell-and-next
+        :desc "Eval cell (stay)"     "E" #'my/python-eval-cell
+        :desc "Eval buffer"          "b" #'my/python-eval-buffer
+        :desc "Eval region"          "s" #'my/python-eval-region
+        :desc "Next cell"            "n" #'code-cells-forward-cell
+        :desc "Prev cell"            "p" #'code-cells-backward-cell))
 
 ;; ===== C/C++ DEVELOPMENT CONFIGURATION =====
 ;; Enable Language Server Protocol (LSP) for C++ development
@@ -329,13 +454,23 @@
 
 ;; ===== ORG & JUPYTER CONFIGURATION =====
 
+(add-to-list 'exec-path "/home/moucah/projects/python/.venv/bin")
+
 (use-package! jupyter
   :after org
   :config
   (require 'ob-jupyter)
   ;; Disable :async for jupyter blocks (incompatible with :session)
   (setq org-babel-default-header-args:jupyter-python
-        '((:async . "no"))))
+        '((:async . "no")))
+  ;; Emacs 30.2 / emacs-jupyter incompatibility: pcase-let* in jupyter-bind
+  ;; fails to bind `state` lexically during REPL init sync. Suppress the error
+  ;; so the REPL still starts; execution count may not update on first block.
+  (defadvice! my/jupyter-sync-state-ignore-void-var-a (fn &rest args)
+    :around #'jupyter-repl-sync-execution-state
+    (condition-case nil
+        (apply fn args)
+      (void-variable nil))))
 
 (after! org
   (setq org-babel-load-languages
@@ -363,10 +498,12 @@
          (formatted
           (with-temp-buffer
             (insert input)
-            (when (zerop (call-process-region (point-min) (point-max)
-                                              "ruff" t '(t nil) nil
-                                              "format" "--stdin-filename" fname "-"))
-              (buffer-string)))))
+            (condition-case nil
+                (when (zerop (call-process-region (point-min) (point-max)
+                                                  "ruff" t '(t nil) nil
+                                                  "format" "--stdin-filename" fname "-"))
+                  (buffer-string))
+              (error nil)))))
     (when (and formatted (not (string= input formatted)))
       (let ((p (point)))
         (delete-region (point-min) (point-max))
@@ -391,10 +528,12 @@
                    (formatted
                     (with-temp-buffer
                       (insert input)
-                      (when (zerop (call-process-region (point-min) (point-max)
-                                                        "ruff" t '(t nil) nil
-                                                        "format" "--stdin-filename" fname "-"))
-                        (buffer-string)))))
+                      (condition-case nil
+                          (when (zerop (call-process-region (point-min) (point-max)
+                                                            "ruff" t '(t nil) nil
+                                                            "format" "--stdin-filename" fname "-"))
+                            (buffer-string))
+                        (error nil)))))
               (when (and formatted (not (string= input formatted)))
                 (delete-region code-beg code-end)
                 (goto-char code-beg)
@@ -403,7 +542,7 @@
 (defun my-org-insert-jupyter-cell ()
   "Insert a new jupyter-python src block."
   (interactive)
-  (insert "#+begin_src jupyter :kernel pyvenv :session py :results output\n\n#+end_src\n")
+  (insert "#+begin_src jupyter :kernel python3 :session py :results output\n\n#+end_src\n")
   (forward-line -1))
 
 ;; Flag for deferred cell creation after async Jupyter execution
@@ -528,8 +667,7 @@ Runs from `org-babel-after-execute-hook' so results are already inserted."
       :desc "Insert Jupyter cell" "i j" #'my-org-insert-jupyter-cell
       :desc "Execute and next" "i e" #'my-org-jupyter-execute-and-next)
 
-(setq ob-jupyter-default-server-command
-      "/home/micah/projects/python/.venv/bin/jupyter")
+(setq jupyter-command "/home/moucah/projects/python/.venv/bin/jupyter")
 ;; Clean carriage-return progress bars (tqdm etc.) after execution.
 ;; Simulates terminal behavior: only keeps the final state of each line.
 (defun my/org-babel-clean-cr-output ()

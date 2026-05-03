@@ -17,6 +17,7 @@
 ;; (package! poly-org)
 (package! org-modern)
 (package! corfu-terminal)
+(package! code-cells)
 
 ;; Lean 4 support
 (package! lean4-mode
