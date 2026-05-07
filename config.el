@@ -447,6 +447,16 @@ If at the last cell, insert a new cell below and jump to it."
       :desc "Harpoon add file"   "h a" #'harpoon-add-file
       :desc "Harpoon clear"      "h c" #'harpoon-clear)
 
+;; Window width snap
+(defun my/set-window-width-pct (pct)
+  (interactive "nWidth (pct): ")
+  (let ((delta (- (round (* (frame-inner-width) (/ pct 100.0)))
+                  (window-total-width))))
+    (window-resize nil delta t)))
+
+(map! :leader :prefix "w"
+      :desc "Set width %" "W" #'my/set-window-width-pct)
+
 ;; 2. Rainbow Delimiters
 ;; Helps visualize nested brackets in C++ templates and complex macros
 ;; (add-hook! 'prog-mode-hook #'rainbow-delimiters-mode)
