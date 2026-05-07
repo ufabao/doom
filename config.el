@@ -113,10 +113,17 @@
     (jupyter-eval-region nil (car bounds) (cadr bounds))))
 
 (defun my/python-eval-cell-and-next ()
-  "Evaluate the current # %% cell and jump to the next one."
+  "Evaluate the current # %% cell and jump to the next one.
+If at the last cell, insert a new cell below and jump to it."
   (interactive)
   (my/python-eval-cell)
-  (code-cells-forward-cell))
+  (if (save-excursion
+        (end-of-line)
+        (re-search-forward "^# %%" nil t))
+      (code-cells-forward-cell)
+    (goto-char (point-max))
+    (unless (bolp) (insert "\n"))
+    (insert "\n# %%\n")))
 
 (defun my/python-eval-region ()
   "Evaluate the selected region in the Jupyter REPL."
